@@ -5,11 +5,11 @@ class RasterLoader:
     def __init__(self, file_path, epsg, flight_bounds):
         self.file_path = file_path
         self.raster = None
+        
         self.epsg = epsg
         self.flight_bounds = flight_bounds
         self.map_bounds = {}
-        #self.x_mesh = None
-        #self.y_mesh = None
+
         
         self.check_projection()
         self.compute_map_bounds()

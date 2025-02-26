@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
+from itertools import combinations
 
 LIDAR_FOV_DEG = 75
 LIDAR_FOV_RAD = np.radians(LIDAR_FOV_DEG/2)
@@ -14,6 +14,7 @@ class Footprint:
         # Masks 
         self.superpos_masks = []
         self.observed_masks = [] # not really useful.. maybe for visualization ??
+        self.superpos_flight_pairs = [] # to store pairs of flight which have overlaps
         
         self.get_superpos_zones() 
         
@@ -25,14 +26,20 @@ class Footprint:
             print(f"Processing {flight_key}")
             # Get single flight coordinates 
             self.flight_coordinates(flight_data)
-            
             # Get single flight footprint
             self.get_footprint()
             
-        # Compute superposition zone 
-        # MODIF -> changer les indices pour rendre le truc robuste si on a plus que deux vols!
-        combined_mask = self.observed_masks[0] & self.observed_masks[1]
-        self.superpos_masks.append(combined_mask)
+        # Get all possible combinations of flights for superposition
+        flight_number = list(range(1, len(self.observed_masks)+1))
+        
+        for i, j in combinations(flight_number, 2):
+            # Create a combined mask for this pair of flights
+            combined_mask = self.observed_masks[i-1] & self.observed_masks[j-1] 
+            # Store the combined mask
+            self.superpos_masks.append(combined_mask)
+            # Store which flights created this mask
+            self.superpos_flight_pairs.append((i, j))
+        print(f'All possible pairs: {self.superpos_flight_pairs}')
             
     def flight_coordinates(self, flight_data):
             self.flight_E = flight_data['lon']

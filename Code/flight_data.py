@@ -16,12 +16,10 @@ class FlightData:
         self.load_flights()
 
     def load_flight_data(self):
-
         cols = ['gps_time', 'lon', 'lat', 'alt', 'roll', 'pitch', 'yaw']
         return pd.read_csv(self.csv_path, names=cols, header=None)
 
     def load_flights(self):
-
         with open(self.config_path, 'r') as file:
             times = json.load(file)
 
