@@ -1,0 +1,16 @@
+{
+  "flight_intervals": {
+    "flight_1": {
+      "start": 396528.0,
+      "end": 396666.0
+    },
+    "flight_2": {
+      "start": 396724.0,
+      "end": 396844.0
+    },
+    "flight_3": {
+      "start": 396930.0,
+      "end": 396990.0
+    }
+  }
+}
