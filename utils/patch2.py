@@ -64,8 +64,9 @@ class PatchGenerator():
                                  self.y_mesh[contour_y, contour_x] - 25 / 2]).T
         self.contours_list.append(contour)
 
-
-    def get_centerline(self, superpos_zone):    
+    
+    def get_centerline(self, superpos_zone):
+        """Get the centerline of the superposition zone using PCA."""
         mask_coords = np.column_stack(np.where(superpos_zone))
 
         # Convert to original coordinate system
@@ -91,7 +92,7 @@ class PatchGenerator():
         centerline = pca.inverse_transform(line_points)
         
         self.centerlines_list.append(centerline)    
-        
+    
     def patches_along_centerline(self):
         patches = []
         # Convert last contour stored and centerline to Shapely polygon and LineString
@@ -112,8 +113,6 @@ class PatchGenerator():
         
         # Find valid starting point
         valid_start_found = False
-        valid_end_found = False
-
         start_dist = 0
         
         while not valid_start_found and start_dist < centerline_line.length:
@@ -131,12 +130,13 @@ class PatchGenerator():
             
             if patch_poly.within(contour_polygon):
                 valid_start_found = True
+                patches.append(patch)
 
             else:
                 # Move start point forward
-                start_dist += 200  # changer incrémentation plus grande nécessaire sinon effet de bord trop importants 
+                start_dist += 20  # changer incrémentation?
                 
-        patches.append(patch)
+        
         # If we couldn't find a valid starting point, return empty list
         if not valid_start_found:
             # ++ add error message 
@@ -159,15 +159,11 @@ class PatchGenerator():
             current_dist += self.sample_distance
             
         # check for last patch not to intersect the contour, remove it if it does 
-        while not valid_end_found:
-            
-            last_patch = patches[-1]
-            last_patch_poly = Polygon(last_patch)
+        last_patch = patches[-1]
+        last_patch_poly = Polygon(last_patch)
 
-            if not last_patch_poly.within(contour_polygon):
-                patches.pop()
-            else:
-                valid_end_found=True
+        if not last_patch_poly.within(contour_polygon):
+            patches.pop()
             
         return patches         
         

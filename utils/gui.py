@@ -85,7 +85,7 @@ class ControlPanel(QWidget):
         
         
     def initUI_panel(self):
-        self.setFixedWidth(150)
+        self.setFixedWidth(250)
         
         # Layout
         layout = QVBoxLayout()
@@ -116,7 +116,7 @@ class ControlPanel(QWidget):
         self.next_button.clicked.connect(self.next_plot)
         
         # Checkbox
-        self.checkBox = QCheckBox("Band along ")
+        self.checkBox = QCheckBox("Single band along centerline")
         self.checkBox.stateChanged.connect(self.toggle_band_mode)
         
         self.flight_label = QLabel(f"Flight pairs: {self.flight_pairs[self.plot_window.plot_index]}")
@@ -244,7 +244,7 @@ class GUIMainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Patch Plotter UI")
-        self.setGeometry(100, 100, 800, 500)
+        self.setGeometry(100, 100, 900, 500)
 
         self.superpositions = superpositions
         self.patches = patches
