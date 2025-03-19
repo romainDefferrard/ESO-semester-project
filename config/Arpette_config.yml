@@ -1,0 +1,22 @@
+#------------------- ALS Arpette config -------------------#
+
+# Input files / directories
+TRAJECTORY_PATH: "Data/Arpette/trajectory.txt"
+MNT_PATH: "Data/espg2056_raster.tif"
+OUTPUT_DIR: "Output/Arpette/test_run"
+LAS_DIR: "Data/Arpette/ARPETTE_LV95_HELL_1560II_CH1_211020_{flight_id}.laz" # ajouter modif CH1 ou CH2
+LOG_DIR: "Data/Arpette/timestamps/211020_{flight_id}_Channel_1.sdc.log"
+
+# Parameters
+DATASET_NAME: "Arpette" # Options: "Arpette", "Vallet"
+
+# Lidar scanning mode 
+LIDAR_SCAN_MODE: "right" # Options: "across", "left", "right" 
+LIDAR_TILT_ANGLE: 14       # [deg]: "Vallet"-> 0, "Arpette"-> 14
+LIDAR_FOV: 60             # [deg]: "Vallet"-> 75, "Arpette"-> 60
+
+# Patch generation  
+PAIR_MODE: "successive" # Options: "successive", "all". Successive: only generate patches from successive lines. All: generate patches from all lines.
+
+# Footprint
+FLIGHT_SAMPLING: 10 # Take a flight position every 10 coordinates 

@@ -1,72 +1,66 @@
-"""Notes d'utilisation: 
-- noms des .las de: nommer de 1 à XX (éviter 01, 02, ...)
-"""
-
 from utils.flight_data import FlightData
 from utils.raster_loader import RasterLoader
 from utils.footprint_generator import Footprint
 from utils.patch_generator import PatchGenerator
 from utils.las_extractor import LasExtractor
-from utils.gui import GUIMainWindow  
+from utils.gui import GUIMainWindow
 
 from PyQt6.QtWidgets import QApplication
 import sys
 import os
 import time
-from multiprocessing import Manager, Pool
-
 import logging
 import yaml
-import rasterio
-import matplotlib.pyplot as plt
-from rasterio.plot import show
-import laspy
-import numpy as np
+import argparse
 
+# Configuration
+parser = argparse.ArgumentParser()
+parser.add_argument("--yml", "-y", required=True, help="Path to the configuration file")
+args = parser.parse_args()
 
-# Configuration 
-DATASET = "Config/Arpette_config.yaml"
-
-def load_config(config_path):
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
-    
-# Load the dataset configuration
-config = load_config(DATASET)
-
-# Config paths 
-#GPSTIME_PATH = config["GPSTIME_PATH"]
+# Config paths
+config = yaml.safe_load(open(args.yml, "r"))
 TRAJECTORY_PATH = config["TRAJECTORY_PATH"]
 MNT_PATH = config["MNT_PATH"]
 OUTPUT_DIR = config["OUTPUT_DIR"]
-#LAS_NAME = config["LAS_PATTERN"]
-
 LAS_DIR = config["LAS_DIR"]
 LOG_DIR = config["LOG_DIR"]
+DATASET_NAME = config["DATASET_NAME"]
+LIDAR_SCAN_MODE = config["LIDAR_SCAN_MODE"]
+LIDAR_TILT_ANGLE = config["LIDAR_TILT_ANGLE"]
+LIDAR_FOV = config["LIDAR_FOV"]
+PAIR_MODE = config["PAIR_MODE"]
+FLIGHT_SAMPLING = config["FLIGHT_SAMPLING"]
 
 # Logger setup
 logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 
-def load_data(pair_mode, lidar_scan_mode, lidar_tilt_angle):
+def load_data():
     # load flights, raster and compute footprints
     logging.info("Loading flight and raster data...")
 
     # Load flight data
-    flight_manager = FlightData(LAS_DIR, LOG_DIR, TRAJECTORY_PATH)
+    flight_manager = FlightData(LAS_DIR, LOG_DIR, TRAJECTORY_PATH, DATASET_NAME)
     flight_bounds = flight_manager.bounds
     flights = flight_manager.flights
-    
+
     # Load raster data
     raster_loader = RasterLoader(MNT_PATH, epsg=2056, flight_bounds=flight_bounds)
     raster = raster_loader.raster
     raster_mesh = (raster_loader.x_mesh, raster_loader.y_mesh)
-    
+    time0 = time.time()
     # Compute footprint
-    start_time = time.time()
-    footprint = Footprint(raster=raster, raster_mesh=raster_mesh, flights=flights, mode=pair_mode, lidar_scan_mode=lidar_scan_mode, lidar_tilt_angle=lidar_tilt_angle)
-    logging.info(f"footprint terminée en {time.time() - start_time:.2f} secondes.")
-
-    
+    footprint = Footprint(
+        raster=raster,
+        raster_mesh=raster_mesh,
+        flights=flights,
+        mode=PAIR_MODE,
+        lidar_scan_mode=LIDAR_SCAN_MODE,
+        lidar_tilt_angle=LIDAR_TILT_ANGLE,
+        fov=LIDAR_FOV, 
+        sampling_interval=FLIGHT_SAMPLING
+    )
+    logging.info(f"footprint: {time.time() - time0:.2f}s")
     return raster_loader, footprint
 
 def run_gui(footprint, patches_all, centerlines_all, contours_all, raster, raster_mesh):
@@ -81,131 +75,22 @@ def run_gui(footprint, patches_all, centerlines_all, contours_all, raster, raste
         raster=raster,
         contours=contours_all,
         extraction_state=False,
-        flight_pairs=footprint.superpos_flight_pairs
+        flight_pairs=footprint.superpos_flight_pairs,
+        output_dir = OUTPUT_DIR
     )
     window.show()
     app.exec()
 
     return window.control_panel.extraction_state, window.control_panel.new_patches_poly
 
-
-def create_tasks(footprint, patches_poly):
-    """Generate tasks for multiprocessing."""
-    tasks = []
-    for idx, (flight_i, flight_j) in enumerate(footprint.superpos_flight_pairs):
-        flight_patch = patches_poly[idx]
-        pair_dir = f"{OUTPUT_DIR}/Flights_{flight_i}_{flight_j}"
-        os.makedirs(pair_dir, exist_ok=True)
-
-        for patch_idx, patch in enumerate(flight_patch):  
-            tasks.append((flight_i, patch_idx, patch, pair_dir, LAS_DIR))
-            tasks.append((flight_j, patch_idx, patch, pair_dir, LAS_DIR))
-
-    return tasks
-
-def create_tasks_las_reading(footprint, las_pattern):
-    """Generate tasks for reading .laz files using multiprocessing."""
-    tasks = []
-    flight_ids = set()  # To track unique flights
-
-    # Iterate over each flight pair in the footprint superposition zones
-    for idx, (flight_i, flight_j) in enumerate(footprint.superpos_flight_pairs):
-        flight_ids.add(flight_i)
-        flight_ids.add(flight_j)
-
-    logging.info(f"Unique flights to read: {len(flight_ids)}")
-
-    # For each unique flight, create a task to read the corresponding .laz file
-    for flight_id in flight_ids:
-        input_file = las_pattern.format(flight_id=flight_id)  # Format the file name for this flight
-        tasks.append((input_file,))  # Make sure each task is a single-element tuple
-
-    return tasks
-
-def extract_patch(flight_id, patch_idx, patch, pair_dir, las_pattern):
-    """Extract LAS data for a given flight and patch."""
-    input_file = las_pattern.format(flight_id=flight_id)  # Use the pattern from the config
-    output_file = f"{pair_dir}/patch_{patch_idx}_flight_{flight_id}.laz"
-    flight_pair = os.path.basename(pair_dir)
-    
-    # Retrieve the correct LAS data and coordinates using the dictionaries
-    
-    extractor = LasExtractor(input=input_file, patch=patch)
-    extractor.patch = patch # add patch to the extractor
-
-    logging.info(f"Extracting patch {patch_idx} for flight {flight_id} ({flight_pair})")
-    #extractor = LasExtractor(input=input_file, output=output_file, patch=patch)
-    extractor.process_patch()
-    logging.info(f"Extraction completed for patch {patch_idx} in flight {flight_id}. Output saved to {output_file}")
-
-def read_laz(task):
-    input_file = task
-    logging.info(f"Reading {input_file}")
-    extractor = LasExtractor(input_file, patch=None)
-    extractor.laz_read()
-    logging.info(f"Finished reading {input_file}")
-    
-def run_extraction(tasks_patch, tasks_laz):
-    """Extraction of patches in corresponding flights .las"""
-
-    start_time = time.time()
-
-    # First, read all .laz files and store coordinates in result_dict
-    extractor = LasExtractor(input=None, patch=None)
-        
-    with Pool() as pool:
-        pool.starmap(read_laz, tasks_laz)
-
-    # Now you have all results in a single dictionary
-    # You can access las_data and coords like:
-
-    # Now, run extraction using the coordinates stored in result_dict
-    logging.info(f"Starting LAS extraction for {len(tasks_patch)} patches...")
-
-    with Pool() as pool:
-        pool.starmap(extract_patch, tasks_patch)
-    logging.info(f"Extraction completed in {time.time() - start_time:.2f} seconds.")
-
-def run_extraction3(footprint, patches_poly, las_format, output_format):
-    """ On test de faire un jeu de donnée à la fois et d'intégrer le multiprocessing 
-        directement dans la classe comme ça on perd pas les données de l'extraction
-        et surtout on la fait pas en boucle inutilement (!)
-    """
-    start_time = time.time()
-
-    # Liste des vols uniques
-    flight_ids = set(flight_i for flight_i, _ in footprint.superpos_flight_pairs) | \
-                 set(flight_j for _, flight_j in footprint.superpos_flight_pairs)
-
-    for flight_id in flight_ids:
-        logging.info(f"Traitement du vol {flight_id}...")
-
-        # Charger le fichier .laz (séquentiel)
-        input_file = las_format.format(flight_id=flight_id)  # Adapter selon ton naming
-        extractor = LasExtractor(input_file, patches=None)
-
-        if not extractor.laz_read():
-            logging.error(f"Impossible de lire {input_file}, passage au vol suivant.")
-            continue
-
-        # Trouver les patches correspondants à ce vol
-        patches_for_flight = []
-        for idx, (flight_i, flight_j) in enumerate(footprint.superpos_flight_pairs):
-            if flight_i == flight_id or flight_j == flight_id:
-                patches_for_flight.extend(patches_poly[idx])
-        # Lancer l'extraction en parallèle
-        extractor.process_all_patches(patches_for_flight, OUTPUT_DIR, )
-
-    logging.info(f"Extraction terminée en {time.time() - start_time:.2f} secondes.")
-
-def run_extraction2(footprint, patches_poly, LAS_DIR, OUTPUT_DIR):
+def run_extraction(footprint, patches_poly, LAS_DIR, OUTPUT_DIR):
     """Exécute l'extraction des patches pour chaque paire de vols et sauvegarde les résultats dans des dossiers distincts."""
     logging.info("Début du processus d'extraction...")
     start_time = time.time()
-    
+
     for idx, (flight_i, flight_j) in enumerate(footprint.superpos_flight_pairs):
         flight_patch = patches_poly[idx]
-        
+
         # Création du répertoire spécifique à la paire de vols
         pair_dir = f"{OUTPUT_DIR}/Flights_{flight_i}_{flight_j}"
         os.makedirs(pair_dir, exist_ok=True)
@@ -215,7 +100,7 @@ def run_extraction2(footprint, patches_poly, LAS_DIR, OUTPUT_DIR):
         input_file = LAS_DIR.format(flight_id=flight_i)
         extractor_i = LasExtractor(input_file, flight_patch)
 
-        if extractor_i.laz_read():
+        if extractor_i.read_point_cloud():
             extractor_i.process_all_patches(flight_patch, OUTPUT_DIR, flight_i, pair_dir)
 
         # Extraction pour le deuxième vol de la paire
@@ -223,27 +108,19 @@ def run_extraction2(footprint, patches_poly, LAS_DIR, OUTPUT_DIR):
         input_file = LAS_DIR.format(flight_id=flight_j)
         extractor_j = LasExtractor(input_file, flight_patch)
 
-        if extractor_j.laz_read():
+        if extractor_j.read_point_cloud():
             extractor_j.process_all_patches(flight_patch, OUTPUT_DIR, flight_j, pair_dir)
     logging.info(f"Extraction terminée en {time.time() - start_time:.2f} secondes.")
 
     logging.info("Extraction complète pour toutes les paires de vols.")
 
 def main():
-    pair_mode = "successive"  # Set mode: "successive" or "all" flight pairs 
-    
-    raster_loader, footprint = load_data(pair_mode=pair_mode, 
-                                         lidar_scan_mode= 'right', 
-                                         lidar_tilt_angle=15)
+
+    raster_loader, footprint = load_data()
     raster, raster_mesh = raster_loader.raster, (raster_loader.x_mesh, raster_loader.y_mesh)
 
     # Create PatchGenerator instance with all superposition zones
-    patch_gen = PatchGenerator(superpos_zones=footprint.superpos_masks, 
-                                raster_mesh=raster_mesh, 
-                                raster=raster, 
-                                patch_params=(50, 100, 400))
-    
-    # Now, patch_gen contains all the patches and centerlines
+    patch_gen = PatchGenerator(superpos_zones=footprint.superpos_masks, raster_mesh=raster_mesh, raster=raster, patch_params=(50, 100, 400))
     patches_all = patch_gen.patches_list
     centerlines_all = patch_gen.centerlines_list  # All centerlines
     contours_all = patch_gen.contours_list  # All contours
@@ -252,15 +129,9 @@ def main():
     extraction_state, new_patches_poly = run_gui(footprint, patches_all, centerlines_all, contours_all, raster, raster_mesh)
 
     if extraction_state:
-    #    tasks_patch = create_tasks(footprint, new_patches_poly)
-    #    tasks_laz = create_tasks_las_reading(footprint, LAS_DIR)
-
-    #    run_extraction(tasks_patch, tasks_laz)
-        run_extraction2(footprint, new_patches_poly, LAS_DIR, OUTPUT_DIR)
-
+        run_extraction(footprint, new_patches_poly, LAS_DIR, OUTPUT_DIR)
     else:
         logging.info("Window closed without extraction.")
-
 
 
 if __name__ == "__main__":
@@ -283,10 +154,6 @@ deux n'a pas marché
     - j'aimerais faire un scanning réel àavec un certain angle pour que globalement le debut et la fin soient 
     - plus réaliste car la je coupe à 90° de la trajectoire alors qu'en réalité je devrait couper à un certain angle 
 
-- Deux modes footprint
-    - classique juste angle FOV
-    - avec un scan à un certain angle 
-    - lequel le mieux ??
     
     
 Centerline:
@@ -306,5 +173,106 @@ Retour Aurel:
 - multiprocessing marchait plus -> plus sur l'extraction mais sur générer les footprint (assez efficace sur l'extraction)
     - essayer de l'intégrer différement sur l'extraction à l'avenir 
 - méthode la plus réaliste de footprint donne mauvais résultat PCA
+
+"""
+
+
+""" Footprint time analysis 
+        
+        def main():
+    
+    def compare_masks(reference_masks, test_masks):
+        if len(reference_masks) != len(test_masks):
+            return False  # Nombre de masques différent
+
+        for ref, test in zip(reference_masks, test_masks):
+            if not np.array_equal(ref, test):
+                return False  # Différence détectée
+
+        return True  # Les masques sont identiques
+
+    sampling_values = [1,2,3,4,5,10,20,30, 50,70, 100,]  # Différents niveaux d'échantillonnage
+    times = []
+    masks_sampling = []
+    _, footprint, elapsed_time = load_data(1)
+    reference_masks = footprint.superpos_masks
+
+    for sampling in sampling_values:
+        raster_loader, footprint, elapsed_time = load_data(sampling)
+        masks = footprint.superpos_masks
+        masks_sampling.append(masks)
+        print(f"Sampling Interval: {sampling} | Temps: {elapsed_time:.2f} sec")
+        identical = compare_masks(reference_masks, masks)
+        print(f"Sampling {sampling} → Identique au raster de référence ? {'✅ Oui' if identical else '❌ Non'}")
+        times.append(elapsed_time)
+        
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(8, 5))
+    plt.plot(sampling_values, times, marker='o', linestyle='-')
+
+    plt.xlabel("Distance between samples (number of steps)")
+    plt.ylabel("Elapsed time (s)")
+    plt.title("Footprint time analysis")
+    #plt.xscale("log")  # Car l'échantillonnage varie de manière exponentielle
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
+
+    plt.savefig("sampling_vs_time.png", dpi=300)
+    plt.show()
+
+    def plot_mask_differences(reference_masks, test_masks, sampling_values):
+        
+        num_samples = len(test_masks)
+        fig, axes = plt.subplots(num_samples, 3, figsize=(5, 3 * num_samples))
+
+        if num_samples == 1:
+            axes = [axes]  # S'assurer que axes est toujours une liste
+
+        for i, (sampling, test_mask) in enumerate(zip(sampling_values, test_masks)):
+            ref_mask = np.array(reference_masks).squeeze()  # Convertir en array et supprimer les dimensions inutiles
+            test_mask = np.array(test_mask).squeeze()
+            diff_mask = np.logical_xor(ref_mask, test_mask)  # Met en évidence les différences
+
+            # Affichage des masques
+            axes[i][0].imshow(ref_mask, cmap="gray")
+            axes[i][0].set_title("Référence")
+
+            axes[i][1].imshow(test_mask, cmap="gray")
+            axes[i][1].set_title(f"Sampling {sampling}")
+
+            axes[i][2].imshow(diff_mask, cmap="hot")
+            axes[i][2].set_title("Différences")
+
+            for ax in axes[i]:
+                ax.axis("off")
+
+        plt.tight_layout()
+        plt.savefig('sampling4.png', dpi=300)
+        plt.show()
+
+    # Exemple d'utilisation
+    # Supposons que reference_masks soit un tableau numpy binaire de référence
+    # Et test_masks soit une liste des masques obtenus avec différents niveaux de sampling
+    plot_mask_differences(reference_masks, masks_sampling, sampling_values)
+    exit()
+
+    raster_loader, footprint = load_data(sampling_interval)
+    raster, raster_mesh = raster_loader.raster, (raster_loader.x_mesh, raster_loader.y_mesh)
+
+    # Create PatchGenerator instance with all superposition zones
+    patch_gen = PatchGenerator(superpos_zones=footprint.superpos_masks, raster_mesh=raster_mesh, raster=raster, patch_params=(50, 100, 400))
+
+    # Now, patch_gen contains all the patches and centerlines
+    patches_all = patch_gen.patches_list
+    centerlines_all = patch_gen.centerlines_list  # All centerlines
+    contours_all = patch_gen.contours_list  # All contours
+
+    # Run GUI with all patches, centerlines, and contours
+    extraction_state, new_patches_poly = run_gui(footprint, patches_all, centerlines_all, contours_all, raster, raster_mesh)
+
+    if extraction_state:
+        run_extraction(footprint, new_patches_poly, LAS_DIR, OUTPUT_DIR)
+    else:
+        logging.info("Window closed without extraction.")
 
 """
