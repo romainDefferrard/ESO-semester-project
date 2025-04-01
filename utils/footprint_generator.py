@@ -5,19 +5,21 @@ import numpy as np
 from multiprocessing import Pool
 import time
 import logging
-from scipy.ndimage import binary_dilation
 
 
 class Footprint:
-    def __init__(self, raster, raster_mesh, flights, mode="all", lidar_scan_mode="across", lidar_tilt_angle=0, fov=75, sampling_interval=1):
+    def __init__(self, raster, raster_mesh, flights, config):
         self.raster_map = raster
         self.flights = flights
         self.x_mesh, self.y_mesh = raster_mesh
-        self.mode = mode
-        self.lidar_scan_mode = lidar_scan_mode  # 'left', 'right', 'across'
-        self.lidar_tilt_angle = lidar_tilt_angle  # [deg] tilt angle from across track 0deg tilt
-        self.lidar_fov = fov
-        self.sampling_interval = sampling_interval
+
+        # Retrieve configuration parameters
+        self.mode = config["PAIR_MODE"]
+        self.lidar_scan_mode = config["LIDAR_SCAN_MODE"]  # 'left', 'right', 'across'
+        self.lidar_tilt_angle = config["LIDAR_TILT_ANGLE"]  # [deg] tilt angle from across track 0deg tilt
+        self.lidar_fov = config["LIDAR_FOV"]
+        self.sampling_interval = config["FLIGHT_SAMPLING"]
+        self.buffer_dist = config["POSITION_BUFFER"]
 
         # Masks
         self.superpos_masks = []
@@ -26,7 +28,7 @@ class Footprint:
 
         self.get_superpos_zones()
 
-        #self.plot_zones(self.observed_masks[0], self.observed_masks[1], self.superpos_masks[0], flights)
+        # self.plot_zones(self.observed_masks[0], self.observed_masks[1], self.superpos_masks[0], flights)
 
     def create_tasks(self):
         """Create tasks for parallel execution of `get_footprint()`"""
@@ -87,8 +89,6 @@ class Footprint:
 
         observed_mask = np.zeros_like(self.raster_map, dtype=bool)
 
-        d_proj = 12.5  # Distance projetée (avant et arrière) en mètres
-
         # Iterate over each flight position (e, n, alt)
         for i, (e, n, alt) in enumerate(zip(self.flight_E, self.flight_N, self.flight_alt)):
 
@@ -108,23 +108,23 @@ class Footprint:
                 scanning_angle_1 = trajectory_angle + np.pi / 2  # Left
                 scanning_angle_2 = trajectory_angle - np.pi / 2  # Right
 
-            if i == 0: # add only buffer forward 
-                e_avant = e + d_proj * np.cos(trajectory_angle)
-                n_avant = n + d_proj * np.sin(trajectory_angle)
-                e_arriere = e 
-                n_arriere = n 
-                
-            elif i == len(self.flight_E)-1: # add only buffer backward 
-                e_avant = e 
-                n_avant = n 
-                e_arriere = e - d_proj * np.cos(trajectory_angle)
-                n_arriere = n - d_proj * np.sin(trajectory_angle)
-                
-            else: # add buffer both forward and backward 
-                e_avant = e + d_proj * np.cos(trajectory_angle)
-                n_avant = n + d_proj * np.sin(trajectory_angle)
-                e_arriere = e - d_proj * np.cos(trajectory_angle)
-                n_arriere = n - d_proj * np.sin(trajectory_angle)
+            if i == 0:  # add only buffer forward
+                e_avant = e + self.buffer_dist * np.cos(trajectory_angle)
+                n_avant = n + self.buffer_dist * np.sin(trajectory_angle)
+                e_arriere = e
+                n_arriere = n
+
+            elif i == len(self.flight_E) - 1:  # add only buffer backward
+                e_avant = e
+                n_avant = n
+                e_arriere = e - self.buffer_dist * np.cos(trajectory_angle)
+                n_arriere = n - self.buffer_dist * np.sin(trajectory_angle)
+
+            else:  # add buffer both forward and backward
+                e_avant = e + self.buffer_dist * np.cos(trajectory_angle)
+                n_avant = n + self.buffer_dist * np.sin(trajectory_angle)
+                e_arriere = e - self.buffer_dist * np.cos(trajectory_angle)
+                n_arriere = n - self.buffer_dist * np.sin(trajectory_angle)
 
             # **Recalcul des angles des tuiles par rapport aux positions avancée et reculée**
             angle_to_grid_forward = np.arctan2(self.y_mesh - n_avant, self.x_mesh - e_avant)
@@ -133,8 +133,9 @@ class Footprint:
             def is_between(angle, min_angle, max_angle):
                 return ((angle - min_angle) % (2 * np.pi)) < ((max_angle - min_angle) % (2 * np.pi))
 
-            valid_scan_mask = is_between(angle_to_grid_forward, scanning_angle_1, scanning_angle_2) & \
-                            is_between(angle_to_grid_backward, scanning_angle_1, scanning_angle_2)
+            valid_scan_mask = is_between(angle_to_grid_forward, scanning_angle_1, scanning_angle_2) & is_between(
+                angle_to_grid_backward, scanning_angle_2, scanning_angle_1
+            )
 
             # **Compute FOV filtering**
             horizontal_distances = np.sqrt((self.x_mesh - e) ** 2 + (self.y_mesh - n) ** 2)
@@ -146,7 +147,7 @@ class Footprint:
 
             # **Final mask: points must be within FOV & align with scanning direction**
             observed_mask |= valid_scan_mask & fov_mask
-  
+
         return flight_key, observed_mask
 
     def get_footprint_init(self, flight_key, flight_data):

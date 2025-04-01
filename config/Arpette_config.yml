@@ -3,7 +3,7 @@
 # Input files / directories
 TRAJECTORY_PATH: "Data/Arpette/trajectory.txt"
 MNT_PATH: "Data/espg2056_raster.tif"
-OUTPUT_DIR: "Output/Arpette/test_run"
+OUTPUT_DIR: "Output/Arpette/demo_run"
 LAS_DIR: "Data/Arpette/ARPETTE_LV95_HELL_1560II_CH1_211020_{flight_id}.laz" # ajouter modif CH1 ou CH2
 LOG_DIR: "Data/Arpette/timestamps/211020_{flight_id}_Channel_1.sdc.log"
 
@@ -17,6 +17,8 @@ LIDAR_FOV: 60             # [deg]: "Vallet"-> 75, "Arpette"-> 60
 
 # Patch generation  
 PAIR_MODE: "successive" # Options: "successive", "all". Successive: only generate patches from successive lines. All: generate patches from all lines.
+PATCH_DIMS: [100, 150, 400]
 
 # Footprint
-FLIGHT_SAMPLING: 10 # Take a flight position every 10 coordinates 
+FLIGHT_SAMPLING: 10 # Take a flight position every 10 coordinates in the trajectory file
+POSITION_BUFFER: 12.5 # the projected forward and backward distance from the flight position to consider for the footprint

@@ -5,12 +5,12 @@ import numpy as np
 
 
 class FlightData:
-    def __init__(self, las_dir, log_dir, trajectory_path, dataset_name):
-        #    self.config_path = config_path
-        self.las_dir = las_dir
-        self.log_dir = log_dir
-        self.trajectory_path = trajectory_path
-        self.dataset_name = dataset_name
+    def __init__(self, config):
+
+        self.las_dir = config["LAS_DIR"]
+        self.log_dir = config["LOG_DIR"]
+        self.trajectory_path = config["TRAJECTORY_PATH"]
+        self.dataset_name = config["DATASET_NAME"]
 
         self.flights = {}  # Store extracted flights
         self.bounds = []  # Store E/N - min/max coordinates for each flight

@@ -3,19 +3,13 @@ import numpy as np
 
 
 class RasterLoader:
-    def __init__(self, file_path, epsg, flight_bounds):
-        self.file_path = file_path
-        self.raster = None
-
-        self.epsg = epsg
+    def __init__(self, config, flight_bounds):
+        self.file_path = config["MNT_PATH"]
         self.flight_bounds = flight_bounds
-
-        self.tile_size = 256
 
         self.map_bounds = {}
 
-        self.check_projection()
-        self.compute_map_bounds()
+        self.compute_map_bounds() # still need to modify it 
         self.load()
 
     def load(self):
@@ -39,18 +33,6 @@ class RasterLoader:
             self.raster = src.read(1, window=window)
 
             return self.raster
-
-    def check_projection(self):
-        with rasterio.open(self.file_path) as src:
-            if src.crs is None:
-                raise ValueError(f"Raster has no defined coordinate system")
-
-            # Check is both CRS are consistent
-            if src.crs != rasterio.crs.CRS.from_epsg(self.epsg):
-                current_epsg = src.crs.to_epsg() or "unknown"
-                raise ValueError(f"Raster is not in EPSG:2056. Current CRS: EPSG:{current_epsg}")
-
-            return True
 
     def compute_map_bounds(self):
         # MODIFIER

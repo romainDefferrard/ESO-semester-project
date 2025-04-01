@@ -9,9 +9,6 @@ import copy
 import logging
 
 
-# logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
-
-
 class LasExtractor:
     def __init__(self, input, patches):
         self.input_file = input
@@ -116,7 +113,6 @@ class LasExtractor:
             setattr(new_las, dimension, data[self.coords_mask])
 
         new_las.write(output_file)
-        logging.info(f"Saved extracted patch to {output_file}")
 
     def write_ascii(self, output_file):
         """Writes extracted points to .TXYZS ASCII format"""
@@ -133,7 +129,6 @@ class LasExtractor:
         )
 
         np.savetxt(output_file, extracted_points, delimiter="\t")
-        logging.info(f"Saved extracted patch to {output_file}")
 
     def copy_header(self):
         self.header = copy.deepcopy(self.las.header)
@@ -142,7 +137,6 @@ class LasExtractor:
     def extract_patch(self, patch, output_dir, flight_id, pair_dir, patch_idx):
         """Extrait un patch spécifique"""
         output_file = f"{pair_dir}/patch_{patch_idx}_flight_{flight_id}.{self.file_format}"
-        logging.info(f"Démarrage de l'extraction du patch {patch_idx} pour le vol {flight_id}.")
 
         bbox_mask, mask = self.patch_filtering_knn_classifier(patch, k=5, prob_threshold=0.3, sample_factor=0.2)
 
@@ -160,5 +154,3 @@ class LasExtractor:
 
         for idx, patch in enumerate(patches):
             self.extract_patch(patch, output_dir, flight_id, pair_dir, idx)
-
-        logging.info(f"Extraction terminée pour le vol {flight_id}")

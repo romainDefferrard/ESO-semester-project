@@ -17,6 +17,10 @@ LIDAR_FOV: 75             # [deg]: "Vallet"-> 75, "Arpette"-> 60
 
 # Patch generation  
 PAIR_MODE: "successive" # Options: "successive", "all". Successive: only generate patches from successive lines. All: generate patches from all lines.
+PATCH_DIMS: [100, 150, 400]
 
 # Footprint
-FLIGHT_SAMPLING: 10 # Take a flight position every 10 coordinates 
+FLIGHT_SAMPLING: 10 # Take a flight position every 10 coordinates in the trajectory file
+POSITION_BUFFER: 12.5 # the projected forward and backward distance from the flight position to consider for the footprint
+
+
