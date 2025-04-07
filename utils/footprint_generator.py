@@ -5,10 +5,11 @@ import numpy as np
 from multiprocessing import Pool
 import time
 import logging
+from typing import Dict, Tuple, List, Optional
 
 
 class Footprint:
-    def __init__(self, raster, raster_mesh, flights, config):
+    def __init__(self, raster: np.ndarray, raster_mesh: Tuple[np.ndarray, np.ndarray], flights: Dict[str, dict], config: dict) -> None:
         self.raster_map = raster
         self.flights = flights
         self.x_mesh, self.y_mesh = raster_mesh
@@ -28,15 +29,11 @@ class Footprint:
 
         self.get_superpos_zones()
 
-        # self.plot_zones(self.observed_masks[0], self.observed_masks[1], self.superpos_masks[0], flights)
-
-    def create_tasks(self):
-        """Create tasks for parallel execution of `get_footprint()`"""
+    def create_tasks(self) -> List[Tuple[str, dict]]:
         return [(flight_key, flight_data) for flight_key, flight_data in self.flights.items()]
 
-    def get_superpos_zones(self):
-        flight_ids = []  # Ensure it's empty at the start
-
+    def get_superpos_zones(self) -> None:
+        flight_ids = []  
         tasks = self.create_tasks()
 
         with Pool() as pool:
@@ -64,21 +61,17 @@ class Footprint:
         for flight_id_1, flight_id_2 in flight_pairs:
             idx_1 = flight_id_to_index[flight_id_1]
             idx_2 = flight_id_to_index[flight_id_2]
-
-            # Create a combined mask for this pair of flights
             combined_mask = self.observed_masks[idx_1] & self.observed_masks[idx_2]
-
-            # Store results
             self.superpos_masks.append(combined_mask)
             self.superpos_flight_pairs.append((flight_id_1, flight_id_2))
 
-    def flight_coordinates(self, flight_data):
+    def flight_coordinates(self, flight_data: dict) -> None:
         step = self.sampling_interval
         self.flight_E = flight_data["lon"][::step]
         self.flight_N = flight_data["lat"][::step]
         self.flight_alt = flight_data["alt"][::step]
 
-    def get_footprint(self, flight_key, flight_data):
+    def get_footprint(self, flight_key: str, flight_data: dict) -> Tuple[str, np.ndarray]:
         """
         Computes the footprint per flight, considering LiDAR scanning mode (across-track, left, right)
         and tilt angle. Uses directional angle checks + FOV filtering.
@@ -150,94 +143,7 @@ class Footprint:
 
         return flight_key, observed_mask
 
-    def get_footprint_init(self, flight_key, flight_data):
-        """
-        Footprint per flight
-        """
-        half_fov_rad = np.radians(self.lidar_fov / 2)
-
-        self.flight_coordinates(flight_data)
-
-        observed_mask = np.zeros_like(self.raster_map, dtype=bool)
-
-        # Correction simple de la FOV effective
-        HALF_FOV_CORR = np.cos(np.radians(self.lidar_tilt_angle)) * half_fov_rad
-
-        # Mask to highlight observed zones based on current flight data
-        for e, n, alt in zip(self.flight_E, self.flight_N, self.flight_alt):
-            # Horizontal distances for each grid point
-            horizontal_distances = np.sqrt((self.x_mesh - e) ** 2 + (self.y_mesh - n) ** 2)
-
-            # Vertical distances for each grid point
-            vertical_distances = alt - self.raster_map
-
-            # Angle of the line of sight to each grid point
-            line_of_sight_angles = np.arctan2(horizontal_distances, vertical_distances)
-
-            # Update the observed_mask for this flight
-            observed_mask |= np.abs(line_of_sight_angles) <= HALF_FOV_CORR
-
-        # Remove start and end zones (perpendicular sampling lines)
-        cropped_mask = self.crop_footprint(observed_mask)
-        #    self.observed_masks.append(cropped_mask) # plus utile avec multiprocessing
-        return flight_key, cropped_mask
-
-    def crop_footprint(self, mask):
-        """
-        Refined cropping to better match the LiDAR footprint with the actual point cloud coverage.
-        Handles trajectory angles properly to avoid incorrect cropping for different flight directions.
-        """
-        # Compute the direction (heading) of the plane
-        flight_dir = np.diff(np.column_stack((self.flight_E, self.flight_N)), axis=0)
-        flight_dir /= np.linalg.norm(flight_dir, axis=1)[:, np.newaxis]  # Normalize to unit vectors
-
-        # Add the last point again to maintain the same length for direction arrays
-        flight_dir = np.vstack((flight_dir, flight_dir[-1]))
-
-        # Compute trajectory angles for start and end
-        trajectory_angle_start = np.arctan2(flight_dir[0, 1], flight_dir[0, 0])
-        trajectory_angle_end = np.arctan2(flight_dir[-1, 1], flight_dir[-1, 0])
-
-        # print(f"Start Trajectory Angle: {trajectory_angle_start:.2f} rad, End: {trajectory_angle_end:.2f} rad")
-
-        # Get flight start and stop positions
-        pos_x_start, pos_y_start = self.flight_E.iloc[0], self.flight_N.iloc[0]
-        pos_x_stop, pos_y_stop = self.flight_E.iloc[-1], self.flight_N.iloc[-1]
-
-        # Compute the angle of each grid point relative to the start and stop positions
-        angle_to_grid_start = np.arctan2(self.y_mesh - pos_y_start, self.x_mesh - pos_x_start)
-        angle_to_grid_stop = np.arctan2(self.y_mesh - pos_y_stop, self.x_mesh - pos_x_stop)
-
-        # **Fix: Compute the wrapped angle difference properly**
-        def angle_difference(angle1, angle2):
-            """Compute the smallest difference between two angles, considering wrap-around at ±π."""
-            return np.abs((angle1 - angle2 + np.pi) % (2 * np.pi) - np.pi)
-
-        angle_diff_start = angle_difference(angle_to_grid_start, trajectory_angle_start)
-        angle_diff_stop = angle_difference(angle_to_grid_stop, trajectory_angle_end)
-
-        # Clear behind the flight path at the start
-        mask &= ~(angle_diff_start > np.pi / 2)
-
-        # Clear ahead of the flight path at the end
-        mask &= ~(angle_diff_stop < np.pi / 2)
-
-        # **Refining lateral cropping**
-        # Define a lateral distance based on LiDAR FOV and altitude
-        lidar_half_fov_rad = np.radians(self.lidar_fov / 2)
-        max_lateral_distance = np.tan(lidar_half_fov_rad) * np.max(self.flight_alt)
-
-        # Compute perpendicular distances from flight path
-        cross_track_dist = np.abs(
-            (self.x_mesh - self.flight_E.iloc[0]) * np.sin(trajectory_angle_start) - (self.y_mesh - self.flight_N.iloc[0]) * np.cos(trajectory_angle_start)
-        )
-
-        # Remove areas that are too far laterally
-        mask &= cross_track_dist <= max_lateral_distance
-
-        return mask
-
-    def plot_zones(self, mask_i, mask_j, combined, flights):
+    def plot_zones(self, mask_i: np.ndarray, mask_j: np.ndarray, combined: np.ndarray, flights: Dict[str, dict]) -> None:
 
         fig, ax = plt.subplots(figsize=(10, 8))
 

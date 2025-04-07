@@ -1,18 +1,23 @@
 import rasterio
 import numpy as np
+from typing import Tuple, List
 
 
 class RasterLoader:
-    def __init__(self, config, flight_bounds):
+    def __init__(self, config: dict, flight_bounds: List[float]) -> None:
         self.file_path = config["MNT_PATH"]
         self.flight_bounds = flight_bounds
 
         self.map_bounds = {}
 
-        self.compute_map_bounds() # still need to modify it 
+        self.raster: np.ndarray
+        self.x_mesh: np.ndarray
+        self.y_mesh: np.ndarray
+
+        self.compute_map_bounds()  # still need to modify it
         self.load()
 
-    def load(self):
+    def load(self) -> np.ndarray:
         with rasterio.open(self.file_path) as src:
 
             # Get raster resolution (pixel size in x and y)
@@ -25,7 +30,6 @@ class RasterLoader:
             row_start, col_start = src.index(x_coords[0], y_coords[0])  # Top-left corner
             row_end, col_end = src.index(x_coords[-1], y_coords[-1])  # Bottom-right corner
 
-            # Create the rasterio window
             window = rasterio.windows.Window.from_slices(
                 (row_start, row_end + 1), (col_start, col_end + 1)  # Add +1 to include last row  # Add +1 to include last column
             )
@@ -34,7 +38,7 @@ class RasterLoader:
 
             return self.raster
 
-    def compute_map_bounds(self):
+    def compute_map_bounds(self) -> None:
         # MODIFIER
         # get max diff flight/map
         # to compute FOV and add ± to bounds

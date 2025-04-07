@@ -7,12 +7,16 @@ import pandas as pd
 import os
 import copy
 import logging
+from laspy import ExtraBytesParams
+from .patch_model import Patch
+from typing import List, Tuple
 
 
 class LasExtractor:
-    def __init__(self, input, patches):
-        self.input_file = input
-        self.patches = patches  # list of patches
+    def __init__(self, config: dict, input_file: str, patches: List[Patch]):
+        self.extraction_mode = config["EXTRACTION_MODE"]
+        self.input_file = input_file
+        self.patches = patches  # list of patches instances
 
         self.las = None  # To store the LAS data (useful for the header)
         self.coords = None  # and the coordinates x,y
@@ -26,7 +30,7 @@ class LasExtractor:
 
         self.file_format = self.detect_file_format()
 
-    def detect_file_format(self):
+    def detect_file_format(self) -> str:
         if self.input_file.endswith(".laz") or self.input_file.endswith(".las"):
             return "laz"
         elif self.input_file.endswith(".TXYZS") or self.input_file.endswith(".txt"):
@@ -34,13 +38,13 @@ class LasExtractor:
         else:
             raise ValueError(f"Unsupported file format: {self.input_file}. Supported: .laz, .las, .TXYZS")
 
-    def read_point_cloud(self):
+    def read_point_cloud(self) -> bool:
         if self.file_format == "laz":
             return self.las_read()
         elif self.file_format == "TXYZS":
             return self.ascii_read()
 
-    def las_read(self):
+    def las_read(self) -> bool:
         """LAS/LAZ reader depending on the format"""
         if not os.path.exists(self.input_file):
             logging.error(f"File not found: {self.input_file}")
@@ -52,7 +56,7 @@ class LasExtractor:
 
         return True
 
-    def ascii_read(self):
+    def ascii_read(self) -> bool:
         """ASCII reader"""
         if not os.path.exists(self.input_file):
             logging.error(f"File not found: {self.input_file}")
@@ -70,41 +74,34 @@ class LasExtractor:
 
         return True
 
-    def patch_filtering_knn_classifier(self, patch, k=5, prob_threshold=0.3, sample_factor=0.1):
-        """Filtrage des points dans un patch avec KNN"""
+    def patch_filtering_knn_classifier(self, patch: Patch, k: int = 5, prob_threshold: float = 0.3, sample_factor: float = 0.1) -> Tuple[np.ndarray, np.ndarray] | Tuple[None, None]:        
+        polygon = patch.shapely_polygon
+        min_x, min_y, max_x, max_y = polygon.bounds
 
-        min_x, min_y, max_x, max_y = patch.bounds
         bbox_mask = (self.coords[:, 0] >= min_x) & (self.coords[:, 0] <= max_x) & (self.coords[:, 1] >= min_y) & (self.coords[:, 1] <= max_y)
         points_in_bbox = self.coords[bbox_mask]
 
-        # Vérifier s'il y a des points dans la bounding box
         if len(points_in_bbox) == 0:
-            logging.warning(f"Aucun point filtré dans le patch {patch}. Fichier non sauvegardé.")
             return None, None
 
         df = pd.DataFrame(points_in_bbox, columns=["x", "y"])
-        # Sélection aléatoire d'un sous-ensemble de points
-        sample_size = int(sample_factor * len(df))  # Évite de prendre 0 échantillons
+        sample_size = max(1, int(sample_factor * len(df)))
         df_short = df.sample(n=sample_size, random_state=42).copy()
 
-        # Labellisation des points (1 si à l'intérieur, 0 sinon)
-        df_short["labels"] = [patch.contains(Point(px, py)) for px, py in zip(df_short.x, df_short.y)]
+        df_short["labels"] = [polygon.contains(Point(px, py)) for px, py in zip(df_short.x, df_short.y)]
 
-        # Entraînement du KNN
         knn = KNeighborsClassifier(n_neighbors=k)
         knn.fit(df_short[["x", "y"]], df_short["labels"])
 
-        # Prédiction de probabilité pour tous les points du patch
         df["predict"] = knn.predict_proba(df[["x", "y"]])[:, 1]
 
-        # Création du masque filtré
         mask = df["predict"].values > prob_threshold
         self.coords_mask = np.zeros(len(self.coords), dtype=bool)
         self.coords_mask[bbox_mask] = mask
 
         return bbox_mask, mask
 
-    def write_las(self, output_file):
+    def write_las(self, output_file: str) -> None:
 
         self.copy_header()
         new_las = laspy.LasData(self.header)
@@ -114,7 +111,7 @@ class LasExtractor:
 
         new_las.write(output_file)
 
-    def write_ascii(self, output_file):
+    def write_ascii(self, output_file: str) -> None:
         """Writes extracted points to .TXYZS ASCII format"""
         extracted_points = np.column_stack(
             (
@@ -130,18 +127,16 @@ class LasExtractor:
 
         np.savetxt(output_file, extracted_points, delimiter="\t")
 
-    def copy_header(self):
+    def copy_header(self) -> None:
         self.header = copy.deepcopy(self.las.header)
         self.header.point_count = np.sum(self.coords_mask)
 
-    def extract_patch(self, patch, output_dir, flight_id, pair_dir, patch_idx):
-        """Extrait un patch spécifique"""
-        output_file = f"{pair_dir}/patch_{patch_idx}_flight_{flight_id}.{self.file_format}"
-
-        bbox_mask, mask = self.patch_filtering_knn_classifier(patch, k=5, prob_threshold=0.3, sample_factor=0.2)
-
+    def extract_patch(self, patch: Patch, output_dir: str, flight_id: str, pair_dir: str):
+        """Extracts a single patch"""
+        output_file = f"{pair_dir}/patch_{patch.id}_flight_{flight_id}.{self.file_format}"
+        bbox_mask, mask = self.patch_filtering_knn_classifier(patch)
         if bbox_mask is None or mask is None or np.sum(mask) == 0:
-            logging.warning(f"Aucun point filtré dans le patch {patch_idx}, fichier non sauvegardé.")
+            logging.warning(f"No filtered points in patch {patch.patch_id}, skipping save.")
             return
 
         if self.file_format == "TXYZS":
@@ -149,8 +144,134 @@ class LasExtractor:
         else:
             self.write_las(output_file)
 
-    def process_all_patches(self, patches, output_dir, flight_id, pair_dir):
-        """Exécute l'extraction des patches en parallèle"""
+    def process_all_patches(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
+        if self.extraction_mode == "independent":
+            for patch in patches:
+                self.extract_patch(patch, output_dir, flight_id, pair_dir)
+        elif self.extraction_mode == "encoded":
+            self.encode_patches_dynamic(patches, output_dir, flight_id, pair_dir)
+        else:
+            raise ValueError(f"Unknown extraction mode: {self.extraction_mode}")
 
-        for idx, patch in enumerate(patches):
-            self.extract_patch(patch, output_dir, flight_id, pair_dir, idx)
+    def encode_patches_dynamic(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
+
+        output_file = f"{pair_dir}/verif_encoded_flight_{flight_id}.las"
+        num_points = len(self.coords)
+
+        # Create output LAZ file
+        new_las = self.las
+
+        for dim in self.las.point_format.dimension_names:
+            setattr(new_las, dim, getattr(self.las, dim))
+
+        # Initialize num_patches
+        new_las.add_extra_dim(ExtraBytesParams(name="num_patches", type=np.uint8))
+        new_las.num_patches = np.zeros(num_points, dtype=np.uint8)
+
+        # Initialize first patch_id column
+        new_las.add_extra_dim(ExtraBytesParams(name="patch_ids_1", type=np.uint8))
+        new_las.patch_ids_1 = np.zeros(num_points, dtype=np.uint8)
+        max_patch_columns = 1  # tracking how many patch_ids_X exist
+
+        # Loop over patches
+        for i, patch in enumerate(patches):
+            logging.info(f"processing patch {i+1} out of {len(patches)}")
+            _, mask = self.patch_filtering_knn_classifier(patch)
+            if mask is None:
+                continue
+
+            selected_indices = np.where(self.coords_mask)[0]
+
+            for idx in selected_indices:
+                n = new_las.num_patches[idx]
+
+                field_name = f"patch_ids_{n + 1}"
+
+                if not hasattr(new_las, field_name):
+                    new_las.add_extra_dim(ExtraBytesParams(name=field_name, type=np.uint8))
+                    setattr(new_las, field_name, np.zeros(num_points, dtype=np.uint8))
+                    logging.info(f"Created new field: {field_name}")
+                    max_patch_columns += 1
+
+                getattr(new_las, field_name)[idx] = patch.id
+                new_las.num_patches[idx] += 1
+
+        # Final write
+        new_las.write(output_file)
+        logging.info(f"Saved encoded LAS to: {output_file}")
+
+"""
+    def fast_patch_mask(self, patch: Patch) -> np.ndarray:
+     
+        center = patch.metadata["center"]
+        direction = patch.metadata["direction"]
+        length = patch.metadata["length"]
+        width = patch.metadata["width"]
+
+        # Compute rotation matrix to align patch with X-axis
+        theta = np.arctan2(direction[1], direction[0])
+        rotation_matrix = np.array([
+            [np.cos(-theta), -np.sin(-theta)],
+            [np.sin(-theta),  np.cos(-theta)]
+        ])
+
+        # Rotate all coordinates into patch's frame
+        coords_shifted = self.coords - center
+        coords_local = coords_shifted @ rotation_matrix.T
+
+        # Simple rectangle mask in aligned frame
+        half_len = length / 2
+        half_width = width / 2
+        inside_mask = (
+            (np.abs(coords_local[:, 0]) <= half_len) &
+            (np.abs(coords_local[:, 1]) <= half_width)
+        )
+
+        return inside_mask
+
+    def encode_patches_dynamic(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
+        output_file = f"{pair_dir}/verif_encoded_flight_{flight_id}.las"
+        num_points = len(self.coords)
+
+        # Create output LAZ file
+        new_las = self.las
+
+        for dim in self.las.point_format.dimension_names:
+            setattr(new_las, dim, getattr(self.las, dim))
+
+        # Initialize num_patches
+        new_las.add_extra_dim(ExtraBytesParams(name="num_patches", type=np.uint8))
+        new_las.num_patches = np.zeros(num_points, dtype=np.uint8)
+
+        # Initialize first patch_id column
+        new_las.add_extra_dim(ExtraBytesParams(name="patch_ids_1", type=np.uint8))
+        new_las.patch_ids_1 = np.zeros(num_points, dtype=np.uint8)
+        max_patch_columns = 1  # tracking how many patch_ids_X exist
+
+        # Loop over patches
+        for i, patch in enumerate(patches):
+            logging.info(f"processing patch {i+1} out of {len(patches)}")
+            mask = self.fast_patch_mask(patch)
+            if mask is None:
+                continue
+
+            selected_indices = np.where(mask)[0]
+
+            for idx in selected_indices:
+                n = new_las.num_patches[idx]
+
+                field_name = f"patch_ids_{n + 1}"
+
+                if not hasattr(new_las, field_name):
+                    new_las.add_extra_dim(ExtraBytesParams(name=field_name, type=np.uint8))
+                    setattr(new_las, field_name, np.zeros(num_points, dtype=np.uint8))
+                    logging.info(f"Created new field: {field_name}")
+                    max_patch_columns += 1
+
+                getattr(new_las, field_name)[idx] = patch.id
+                new_las.num_patches[idx] += 1
+
+        # Final write
+        new_las.write(output_file)
+        logging.info(f"Saved encoded LAS to: {output_file}")
+""" 
