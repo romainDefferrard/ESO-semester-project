@@ -1,0 +1,8 @@
+# Input .shp file/ Output CSV 
+SHP_PATH: "Data/EXTEND_SDC_LEFT_M230905.shp"
+OUTPUT_PATH: "Output/Extracted_segments.csv"
+
+# Buffer [m]
+BUFFER: 10
+EPSG: 2056
+
