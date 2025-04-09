@@ -1,9 +1,10 @@
 import geopandas as gpd
 import warnings
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 from matplotlib.colors import to_rgba
 from matplotlib.patches import Patch
-
+import networkx as nx
 
 class MLS:
     def __init__(self, filename, epsg, buffer):
@@ -21,21 +22,65 @@ class MLS:
         #   self.most_inters()
         #   self.inters_sorted = self.intersections.sort_values(by="shared_length_m", ascending=True)
 
-        self.intersections["n_segments"] = self.intersections.geometry.apply(lambda geom: self.gdf["buffer"].intersects(geom).sum())
-        #  self.intersections = self.intersections.sort_values(by="n_segments", ascending=False)
-
-        # print(self.intersections[:5])
+        self.seg_per_intersection()
+        self.group_spatial_intersections_graph()
 
         zones_ids = self.extract_most_visited(top_n=5, plot=True)
-        zone_key = list(zones_ids.keys())[0]
-        zone_entries = zones_ids.get(zone_key)
+
+        first_zone_key = list(zones_ids.keys())[0]
+        zone_entries = zones_ids.get(first_zone_key)
         ids = [entry["id"] for entry in zone_entries]
-        print(ids)
+
+    def seg_per_intersection(self):
+        # Assign a unique ID to each intersection row before deduplication
+        self.intersections["inters_id"] = self.intersections.index + 1        
+        self.intersections["segment_ids"] = self.intersections.geometry.apply(lambda geom: self.gdf[self.gdf["buffer"].intersects(geom)]["id"].tolist())
+        self.intersections["n_segments"] = self.intersections["segment_ids"].apply(len)
+        self.intersections["segment_set"] = self.intersections["segment_ids"].apply(lambda ids: frozenset(ids))
+
+        self.intersections.drop_duplicates(subset="segment_set", inplace=True)
+
+        self.intersections.reset_index(drop=True, inplace=True)
+
+    def group_spatial_intersections_graph(self):
+        overlaps = self.intersections.copy().reset_index(drop=True)
+        overlaps["geometry"] = overlaps["overlap_geom"]
+
+        G = nx.Graph()
+        G.add_nodes_from(overlaps.index)
+
+        for i in overlaps.index:
+            geom_i = overlaps.at[i, "geometry"]
+            for j in overlaps.index[i + 1:]:
+                if overlaps.at[j, "geometry"].intersects(geom_i):
+                    G.add_edge(i, j)
+
+        components = list(nx.connected_components(G))
+        records = []
+
+        for zone_id, group in enumerate(components):
+            group_df = overlaps.loc[list(group)]
+            union_geom = group_df.unary_union
+            segment_ids = list(set([s for sub in group_df["segment_ids"] for s in sub]))
+            shared_len = group_df["shared_length_m"].sum()
+            area = group_df["overlap_area_m2"].sum()
+
+            records.append({
+                "zone_id": zone_id,
+                "overlap_geom": union_geom,
+                "segment_ids": segment_ids,
+                "n_segments": len(segment_ids),
+                "shared_length_m": shared_len,
+                "overlap_area_m2": area,
+            })
+
+        self.intersections = gpd.GeoDataFrame(records, geometry="overlap_geom", crs=self.gdf.crs)
+
 
     def extract_most_visited(self, top_n=5, plot=True, margin=100):
 
         sorted_zones = self.intersections.sort_values(by="n_segments", ascending=False).head(top_n)
-        print(sorted_zones[:1])
+        print(sorted_zones[:5])
         zone_id_map = {}
 
         for i, row in sorted_zones.iterrows():
@@ -65,8 +110,6 @@ class MLS:
                     edge_color = to_rgba(base_color, alpha=0.9)
 
                     seg["buffer"].plot(ax=ax, color=fill_color, edgecolor=edge_color, linewidth=1.2)
-                    seg["geometry"].plot(ax=ax, color=fill_color, edgecolor=edge_color, linewidth=1.2)
-
                     legend_handles.append(Patch(facecolor=fill_color, edgecolor=edge_color, label=f"id {seg_id}"))
 
                 # Plot the intersection geometry
@@ -97,7 +140,6 @@ class MLS:
     def get_intersections(self):
 
         records = []
-
         for i in range(len(self.gdf)):
             for j in range(i + 1, len(self.gdf)):
                 buf1 = self.gdf.loc[i, "buffer"]
@@ -127,6 +169,7 @@ class MLS:
                             }
                         )
         intersections = gpd.GeoDataFrame(records, geometry="overlap_geom", crs=self.gdf.crs)
+
         return intersections
 
     def add_times(self):
