@@ -15,7 +15,8 @@ pour créer les patchs samplés sur la ligne directice de la zone.
 
 class PatchGenerator:
     def __init__(
-        self, superpos_zones: List[np.ndarray], raster_mesh: Tuple[np.ndarray, np.ndarray], raster: np.ndarray, patch_params: Tuple[float, float, float]):
+        self, superpos_zones: List[np.ndarray], raster_mesh: Tuple[np.ndarray, np.ndarray], raster: np.ndarray, patch_params: Tuple[float, float, float]
+    ):
         self.superpos_zones_all = superpos_zones
         self.raster_map = raster  # Only useful for plotting
         self.x_mesh, self.y_mesh = raster_mesh
@@ -154,8 +155,8 @@ class PatchGenerator:
 
         corners = np.array([corner1, corner2, corner3, corner4, corner1])
         polygon = Polygon(corners)
-        
-        center = np.mean(corners[:-1])  # Exclude the closing point
+
+        center = params.startpoint + params.length / 2 * params.direction
         direction = params.direction
         perp_direction = params.perp_direction
 
@@ -163,19 +164,11 @@ class PatchGenerator:
             id=self.patch_id,
             patch_array=corners,
             shapely_polygon=polygon,
-            metadata={
-                "center": center,
-                "direction": direction,
-                "perp_direction": perp_direction,
-                "length": params.length,
-                "width": params.width
-            }
+            metadata={"center": center, "direction": direction, "perp_direction": perp_direction, "length": params.length, "width": params.width},
         )
 
-        #patch = Patch(id=self.patch_id, patch_array=corners, shapely_polygon=polygon)
+        # patch = Patch(id=self.patch_id, patch_array=corners, shapely_polygon=polygon)
         return patch
-
-
 
     def compute_max_patch_length(self, idx: int) -> Tuple[np.ndarray, float]:
         """Find the longest patch that fits along the centerline within the contour."""

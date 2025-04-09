@@ -10,6 +10,8 @@ import logging
 from laspy import ExtraBytesParams
 from .patch_model import Patch
 from typing import List, Tuple
+import time
+from matplotlib.path import Path
 
 
 class LasExtractor:
@@ -74,7 +76,9 @@ class LasExtractor:
 
         return True
 
-    def patch_filtering_knn_classifier(self, patch: Patch, k: int = 5, prob_threshold: float = 0.3, sample_factor: float = 0.1) -> Tuple[np.ndarray, np.ndarray] | Tuple[None, None]:        
+    def patch_filtering_knn_classifier(
+        self, patch: Patch, k: int = 5, prob_threshold: float = 0.3, sample_factor: float = 0.1
+    ) -> Tuple[np.ndarray, np.ndarray] | Tuple[None, None]:
         polygon = patch.shapely_polygon
         min_x, min_y, max_x, max_y = polygon.bounds
 
@@ -174,14 +178,14 @@ class LasExtractor:
         max_patch_columns = 1  # tracking how many patch_ids_X exist
 
         # Loop over patches
+        time0 = time.time()
         for i, patch in enumerate(patches):
             logging.info(f"processing patch {i+1} out of {len(patches)}")
-            _, mask = self.patch_filtering_knn_classifier(patch)
-            if mask is None:
-                continue
+            #_, mask = self.patch_filtering_knn_classifier(patch)
+            # _, mask = self.patch_filtering_path_contains(patch)
 
-            selected_indices = np.where(self.coords_mask)[0]
-
+            #selected_indices = np.where(self.coords_mask)[0]
+            selected_indices = self.fast_patch_mask(patch)
             for idx in selected_indices:
                 n = new_las.num_patches[idx]
 
@@ -195,83 +199,67 @@ class LasExtractor:
 
                 getattr(new_las, field_name)[idx] = patch.id
                 new_las.num_patches[idx] += 1
-
+        logging.info(f"Patch extraction time: {time.time()-time0:.2f}s")
         # Final write
         new_las.write(output_file)
         logging.info(f"Saved encoded LAS to: {output_file}")
 
-"""
+    def patch_filtering_path_contains(self, patch: Patch) -> Tuple[np.ndarray, np.ndarray] | Tuple[None, None]:
+        """
+        Uses matplotlib.path.Path.contains_points to quickly filter points inside a polygon.
+
+        Returns:
+            Tuple of:
+            - bbox_mask: Boolean mask of points inside AABB (bounding box)
+            - inside_mask: Boolean mask of bbox points that are inside the polygon
+        """
+        polygon = patch.shapely_polygon
+        min_x, min_y, max_x, max_y = polygon.bounds
+
+        # Fast bounding box filter
+        bbox_mask = (self.coords[:, 0] >= min_x) & (self.coords[:, 0] <= max_x) & (self.coords[:, 1] >= min_y) & (self.coords[:, 1] <= max_y)
+        coords_bbox = self.coords[bbox_mask]
+
+        if len(coords_bbox) == 0:
+            return None, None
+
+        # Use matplotlib Path
+        path = Path(np.array(polygon.exterior.coords))
+        inside_mask = path.contains_points(coords_bbox)
+
+        # Store as global mask
+        self.coords_mask = np.zeros(len(self.coords), dtype=bool)
+        self.coords_mask[np.where(bbox_mask)[0][inside_mask]] = True
+
+        return bbox_mask, inside_mask
+
     def fast_patch_mask(self, patch: Patch) -> np.ndarray:
-     
+        polygon = patch.shapely_polygon
+        min_x, min_y, max_x, max_y = polygon.bounds
+
+        bbox_mask = (self.coords[:, 0] >= min_x) & (self.coords[:, 0] <= max_x) & (self.coords[:, 1] >= min_y) & (self.coords[:, 1] <= max_y)
+
         center = patch.metadata["center"]
         direction = patch.metadata["direction"]
         length = patch.metadata["length"]
         width = patch.metadata["width"]
 
-        # Compute rotation matrix to align patch with X-axis
         theta = np.arctan2(direction[1], direction[0])
+
         rotation_matrix = np.array([
-            [np.cos(-theta), -np.sin(-theta)],
-            [np.sin(-theta),  np.cos(-theta)]
-        ])
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta),  np.cos(theta)]
+        ])        
+        coords = self.coords[bbox_mask].copy()
+        coords_shifted = coords - center
 
-        # Rotate all coordinates into patch's frame
-        coords_shifted = self.coords - center
-        coords_local = coords_shifted @ rotation_matrix.T
+        coords_local = coords_shifted @ rotation_matrix
 
-        # Simple rectangle mask in aligned frame
         half_len = length / 2
         half_width = width / 2
-        inside_mask = (
-            (np.abs(coords_local[:, 0]) <= half_len) &
-            (np.abs(coords_local[:, 1]) <= half_width)
-        )
 
-        return inside_mask
-
-    def encode_patches_dynamic(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
-        output_file = f"{pair_dir}/verif_encoded_flight_{flight_id}.las"
-        num_points = len(self.coords)
-
-        # Create output LAZ file
-        new_las = self.las
-
-        for dim in self.las.point_format.dimension_names:
-            setattr(new_las, dim, getattr(self.las, dim))
-
-        # Initialize num_patches
-        new_las.add_extra_dim(ExtraBytesParams(name="num_patches", type=np.uint8))
-        new_las.num_patches = np.zeros(num_points, dtype=np.uint8)
-
-        # Initialize first patch_id column
-        new_las.add_extra_dim(ExtraBytesParams(name="patch_ids_1", type=np.uint8))
-        new_las.patch_ids_1 = np.zeros(num_points, dtype=np.uint8)
-        max_patch_columns = 1  # tracking how many patch_ids_X exist
-
-        # Loop over patches
-        for i, patch in enumerate(patches):
-            logging.info(f"processing patch {i+1} out of {len(patches)}")
-            mask = self.fast_patch_mask(patch)
-            if mask is None:
-                continue
-
-            selected_indices = np.where(mask)[0]
-
-            for idx in selected_indices:
-                n = new_las.num_patches[idx]
-
-                field_name = f"patch_ids_{n + 1}"
-
-                if not hasattr(new_las, field_name):
-                    new_las.add_extra_dim(ExtraBytesParams(name=field_name, type=np.uint8))
-                    setattr(new_las, field_name, np.zeros(num_points, dtype=np.uint8))
-                    logging.info(f"Created new field: {field_name}")
-                    max_patch_columns += 1
-
-                getattr(new_las, field_name)[idx] = patch.id
-                new_las.num_patches[idx] += 1
-
-        # Final write
-        new_las.write(output_file)
-        logging.info(f"Saved encoded LAS to: {output_file}")
-""" 
+        inside_mask = (np.abs(coords_local[:, 0]) <= half_len) & (np.abs(coords_local[:, 1]) <= half_width)
+        # Return the indices in the full array
+        full_indices = np.where(bbox_mask)[0][inside_mask]
+ 
+        return full_indices
