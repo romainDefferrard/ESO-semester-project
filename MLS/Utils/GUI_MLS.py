@@ -5,7 +5,7 @@ from matplotlib.widgets import RectangleSelector
 from matplotlib.colors import to_rgba
 import geopandas as gpd
 import csv
-import os 
+import os
 
 
 class PlotWindow(QWidget):
@@ -18,7 +18,6 @@ class PlotWindow(QWidget):
         self.current_ids = []
         self.plot_mode = "default"  # "default" or "zoomed"
 
-        # figure
         self.figure, self.ax = plt.subplots()
         self.figure.set_constrained_layout(True)
         self.canvas = FigureCanvas(self.figure)
@@ -27,72 +26,14 @@ class PlotWindow(QWidget):
         layout.addWidget(self.canvas)
         self.setLayout(layout)
 
+        self.toggle_selector = None
         self.plot_intersections()
+        self.setup_selector()
 
-    def plot_intersections(self):
-        all_ids = set()
-
-        def draw_plot(xmin=None, xmax=None, ymin=None, ymax=None):
-            self.ax.clear()
-            all_ids.clear()
-            ids_pairs = []
-
-            if self.control_panel:
-                self.control_panel.displayed_ids.setText("")
-                self.control_panel.clicked_id_label.setText("Clicked Intersection Info")
-
-            if None not in (xmin, xmax, ymin, ymax):
-                self.gdf_filtered = self.gdf.cx[xmin:xmax, ymin:ymax]
-                intersections_filtered = self.intersections.cx[xmin:xmax, ymin:ymax]
-                self.plot_mode = "zoomed"
-            else:
-                self.gdf_filtered = self.gdf
-                intersections_filtered = self.intersections
-                self.plot_mode = "default"
-
-            for i, row in intersections_filtered.iterrows():
-                zone_geom = row["overlap_geom"]
-                overlapping_segs = self.gdf_filtered[self.gdf_filtered["buffer"].intersects(zone_geom)]
-                ids = overlapping_segs["id"].unique()
-                num_ids = len(ids)
-                base_cmap = plt.colormaps["tab20"]
-                colors = [base_cmap(j / num_ids) for j in range(num_ids)]
-                ids_pairs.append((row["id_1"], row["id_2"]))
-
-                for idx, seg_id in enumerate(ids):
-                    if seg_id in all_ids:
-                        continue
-                    all_ids.add(seg_id)
-                    seg = overlapping_segs[overlapping_segs["id"] == seg_id]
-                    base_color = colors[idx]
-                    fill_color = to_rgba(base_color, alpha=0.3)
-                    edge_color = to_rgba(base_color, alpha=0.9)
-
-                    seg["buffer"].plot(ax=self.ax, color=fill_color, edgecolor=edge_color, linewidth=1)
-                    seg["geometry"].plot(ax=self.ax, color=edge_color, linewidth=1.2)
-
-            if not intersections_filtered.empty:
-                intersections_filtered["overlap_geom"].plot(ax=self.ax, color="none", edgecolor="red", linewidth=2)
-
-            self.ax.set_title("All Intersections and Segments")
-            self.ax.set_aspect("equal")
-            # ax.legend(handles=legend_handles, loc="upper right", fontsize="small")
-            self.canvas.draw()
-            self.current_ids = ids_pairs
-
-            if len(self.current_ids) > 20:
-                return  # Too many segments to display
-            if self.control_panel:
-                self.control_panel.displayed_ids.setText(
-                    "\n".join([f"{a}, {b}" for a, b in self.current_ids]) if self.plot_mode == "zoomed" else "All Segments"
-                )
-                self.control_panel.update_intersection_count(len(intersections_filtered))
-
-        draw_plot()
-
-        toggle_selector = RectangleSelector(
+    def setup_selector(self):
+        self.toggle_selector = RectangleSelector(
             self.ax,
-            None,
+            self.onselect,
             useblit=True,
             button=[1],
             minspanx=5,
@@ -100,35 +41,89 @@ class PlotWindow(QWidget):
             spancoords="pixels",
             interactive=True,
         )
+        self.toggle_selector.set_active(True)
+        self.canvas.mpl_connect("button_press_event", self.on_click)
 
-        def onselect(eclick, erelease):
-            nonlocal toggle_selector
+    def plot_intersections(self, xmin=None, xmax=None, ymin=None, ymax=None):
+        all_ids = set()
+        ids_pairs = []
 
-            x1, y1 = eclick.xdata, eclick.ydata
-            x2, y2 = erelease.xdata, erelease.ydata
-            xmin, xmax = sorted([x1, x2])
-            ymin, ymax = sorted([y1, y2])
-            if abs(xmax - xmin) > 1e-3 and abs(ymax - ymin) > 1e-3:
-                # Destroy and reinstantiate selector to remove the rectangle
-                toggle_selector.disconnect_events()
-                toggle_selector.set_visible(False)
-                toggle_selector = RectangleSelector(self.ax, onselect, useblit=True, button=[1], minspanx=5, minspany=5, spancoords="pixels", interactive=True)
-                draw_plot(xmin, xmax, ymin, ymax)
+        self.ax.clear()
+        if self.control_panel:
+            self.control_panel.displayed_ids.setText("")
+            self.control_panel.clicked_id_label.setText("Clicked Intersection Info")
 
-        toggle_selector.set_active(True)
-        toggle_selector.onselect = onselect
+        if None not in (xmin, xmax, ymin, ymax):
+            self.gdf_filtered = self.gdf.cx[xmin:xmax, ymin:ymax]
+            intersections_filtered = self.intersections.cx[xmin:xmax, ymin:ymax]
+            self.plot_mode = "zoomed"
+        else:
+            self.gdf_filtered = self.gdf
+            intersections_filtered = self.intersections
+            self.plot_mode = "default"
 
-        def on_click(event):
-            if event.inaxes == self.ax:
-                x, y = event.xdata, event.ydata
-                point = gpd.GeoSeries([gpd.points_from_xy([x], [y])[0]], crs=self.intersections.crs)
-                matches = self.intersections[self.intersections.intersects(point[0])]
-                if not matches.empty:
-                    for _, row in matches.iterrows():
-                        if self.control_panel:
-                            self.control_panel.clicked_id_label.setText(f"<span style='color: red;'>Clicked ID: {row['id_1']}, {row['id_2']}</span>")
+        for i, row in intersections_filtered.iterrows():
+            zone_geom = row["overlap_geom"]
+            overlapping_segs = self.gdf_filtered[self.gdf_filtered["buffer"].intersects(zone_geom)]
+            ids = overlapping_segs["id"].unique()
+            num_ids = len(ids)
+            base_cmap = plt.colormaps["tab20"]
+            colors = [base_cmap(j / num_ids) for j in range(num_ids)]
+            ids_pairs.append((row["id_1"], row["id_2"]))
 
-        self.canvas.mpl_connect("button_press_event", on_click)
+            for idx, seg_id in enumerate(ids):
+                if seg_id in all_ids:
+                    continue
+                all_ids.add(seg_id)
+                seg = overlapping_segs[overlapping_segs["id"] == seg_id]
+                base_color = colors[idx]
+                fill_color = to_rgba(base_color, alpha=0.3)
+                edge_color = to_rgba(base_color, alpha=0.9)
+
+                seg["buffer"].plot(ax=self.ax, color=fill_color, edgecolor=edge_color, linewidth=1)
+                seg["geometry"].plot(ax=self.ax, color=edge_color, linewidth=1.2)
+
+        if not intersections_filtered.empty:
+            intersections_filtered["overlap_geom"].plot(ax=self.ax, color="none", edgecolor="red", linewidth=2)
+
+        self.ax.set_title("All Intersections and Segments")
+        self.ax.set_aspect("equal")
+        self.canvas.draw()
+
+        self.current_ids = ids_pairs
+         
+        
+        if self.control_panel:
+            self.control_panel.update_intersection_count(len(intersections_filtered))
+            if len(self.current_ids) > 20:
+                return
+            self.control_panel.displayed_ids.setText(
+                "\n".join([f"{a}, {b}" for a, b in self.current_ids])
+                if self.plot_mode == "zoomed" else "All Segments"
+            )
+            self.control_panel.update_intersection_count(len(intersections_filtered))
+
+    def onselect(self, eclick, erelease):
+        x1, y1 = eclick.xdata, eclick.ydata
+        x2, y2 = erelease.xdata, erelease.ydata
+        xmin, xmax = sorted([x1, x2])
+        ymin, ymax = sorted([y1, y2])
+        if abs(xmax - xmin) > 1e-3 and abs(ymax - ymin) > 1e-3:
+            self.toggle_selector.set_visible(False)
+            self.toggle_selector.disconnect_events()
+            self.plot_intersections(xmin, xmax, ymin, ymax)
+            self.setup_selector()
+
+    def on_click(self, event):
+        if event.inaxes == self.ax:
+            x, y = event.xdata, event.ydata
+            point = gpd.GeoSeries([gpd.points_from_xy([x], [y])[0]], crs=self.intersections.crs)
+            matches = self.intersections[self.intersections.intersects(point[0])]
+            if not matches.empty and self.control_panel:
+                for _, row in matches.iterrows():
+                    self.control_panel.clicked_id_label.setText(
+                        f"<span style='color: red;'>Clicked ID: {row['id_1']}, {row['id_2']}</span>"
+                    )
 
 
 class ControlPanel(QWidget):
@@ -137,7 +132,6 @@ class ControlPanel(QWidget):
         self.plot_window = plot_window
         self.intersections = self.parent().intersections
         self.output_path = self.parent().output_path
-
         self.initUI_panel()
 
     def initUI_panel(self):
@@ -170,8 +164,12 @@ class ControlPanel(QWidget):
         self.layout_dividerLine(layout)
 
         self.reset_button = QPushButton("Reset Plot")
-        self.reset_button.clicked.connect(self.plot_window.plot_intersections)
+        self.reset_button.clicked.connect(self.reset_plot)
         layout.addWidget(self.reset_button)
+
+    def reset_plot(self):
+        self.plot_window.plot_intersections()
+        self.plot_window.setup_selector()
 
     def update_intersection_count(self, count):
         self.intersections_count_label.setText(f"Intersections displayed: {count}")
@@ -182,7 +180,6 @@ class ControlPanel(QWidget):
         layout.addWidget(divider)
 
     def extract_segments(self):
-
         intersection_ids = self.plot_window.current_ids
         gdf = self.plot_window.gdf_filtered
         rows = []
@@ -194,7 +191,7 @@ class ControlPanel(QWidget):
         filename = self.output_path
         base, ext = os.path.splitext(self.output_path)
         filename = f"{base}_{len(rows)}{ext}"
-        os.makedirs(os.path.dirname(filename), exist_ok=True)  
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
 
         with open(filename, mode='w', newline='') as f:
             writer = csv.writer(f)
@@ -202,15 +199,13 @@ class ControlPanel(QWidget):
             writer.writerows(rows)
 
         print(f"Extracted {len(rows)} segment pairs to {filename}")
-
-        self.extraction_state = True  # Update state to break main loop
+        self.extraction_state = True
         self.window().close()
 
 
 class GUI_MLS(QMainWindow):
     def __init__(self, gdf, intersections, output):
         super().__init__()
-
         self.setWindowTitle("MLS UI")
         self.setGeometry(100, 100, 900, 500)
 
@@ -220,10 +215,8 @@ class GUI_MLS(QMainWindow):
         self.initUI()
 
     def initUI(self):
-
         self.plot_window = PlotWindow(self)
         self.control_panel = ControlPanel(self, self.plot_window)
-
         self.plot_window.control_panel = self.control_panel
 
         main_layout = QHBoxLayout()

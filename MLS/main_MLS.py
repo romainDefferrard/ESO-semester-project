@@ -1,12 +1,6 @@
 import geopandas as gpd
 import warnings
 import argparse
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-from matplotlib.colors import to_rgba
-from matplotlib.patches import Patch
-from matplotlib.widgets import RectangleSelector
-import networkx as nx
 import yaml
 import sys
 
@@ -17,8 +11,6 @@ from Utils.GUI_MLS import GUI_MLS
 parser = argparse.ArgumentParser()
 parser.add_argument("--yml", "-y", required=True, help="Path to the configuration file")
 args = parser.parse_args()
-
-# Config paths
 config = yaml.safe_load(open(args.yml, "r"))
 
 class MLS:
@@ -92,22 +84,3 @@ if __name__ == "__main__":
 
     mls = MLS(config)
     mls.pipeline()
-
-
-"""
-    #    print(self.intersections[:5])
-    #    self.plot_intersections()
-
-    #    self.add_times()
-    #   self.most_inters()
-    #   self.inters_sorted = self.intersections.sort_values(by="shared_length_m", ascending=True)
-
-    #    self.seg_per_intersection()
-    #    self.group_spatial_intersections_graph()
-
-    #    zones_ids = self.extract_most_visited(top_n=5, plot=True)
-
-    #    first_zone_key = list(zones_ids.keys())[0]
-    #    zone_entries = zones_ids.get(first_zone_key)
-    #    ids = [entry["id"] for entry in zone_entries]
-"""
