@@ -66,9 +66,9 @@ class PlotWindow(QWidget):
             zone_geom = row["overlap_geom"]
             overlapping_segs = self.gdf_filtered[self.gdf_filtered["buffer"].intersects(zone_geom)]
             ids = overlapping_segs["id"].unique()
-            num_ids = len(ids)
+            #num_ids = len(ids)
             base_cmap = plt.colormaps["tab20"]
-            colors = [base_cmap(j / num_ids) for j in range(num_ids)]
+            colors = {seg_id: base_cmap((hash(seg_id) % 20) / 20) for seg_id in ids}
             ids_pairs.append((row["id_1"], row["id_2"]))
 
             for idx, seg_id in enumerate(ids):
@@ -76,7 +76,8 @@ class PlotWindow(QWidget):
                     continue
                 all_ids.add(seg_id)
                 seg = overlapping_segs[overlapping_segs["id"] == seg_id]
-                base_color = colors[idx]
+                base_color = colors[seg_id]
+
                 fill_color = to_rgba(base_color, alpha=0.3)
                 edge_color = to_rgba(base_color, alpha=0.9)
 
@@ -86,7 +87,7 @@ class PlotWindow(QWidget):
         if not intersections_filtered.empty:
             intersections_filtered["overlap_geom"].plot(ax=self.ax, color="none", edgecolor="red", linewidth=2)
 
-        self.ax.set_title("All Intersections and Segments")
+        self.ax.set_title("Intersection from shp segments")
         self.ax.set_aspect("equal")
         self.canvas.draw()
 
@@ -95,7 +96,7 @@ class PlotWindow(QWidget):
         
         if self.control_panel:
             self.control_panel.update_intersection_count(len(intersections_filtered))
-            if len(self.current_ids) > 20:
+            if len(self.current_ids) > 30:
                 return
             self.control_panel.displayed_ids.setText(
                 "\n".join([f"{a}, {b}" for a, b in self.current_ids])
@@ -124,6 +125,7 @@ class PlotWindow(QWidget):
                     self.control_panel.clicked_id_label.setText(
                         f"<span style='color: red;'>Clicked ID: {row['id_1']}, {row['id_2']}</span>"
                     )
+            
 
 
 class ControlPanel(QWidget):
@@ -140,21 +142,23 @@ class ControlPanel(QWidget):
         layout.setSpacing(10)
         self.setLayout(layout)
 
-        layout.addWidget(QLabel("Intersection Viewer"))
         self.layout_dividerLine(layout)
 
         self.intersections_count_label = QLabel(f"Total Intersections: {len(self.intersections)}")
         layout.addWidget(self.intersections_count_label)
 
-        self.ids_label = QLabel("Displayed IDs")
+        self.ids_label = QLabel("Displayed IDs (max 30)")
         layout.addWidget(self.ids_label)
+        
+        self.layout_dividerLine(layout)
+
 
         self.displayed_ids = QLabel(" ")
         layout.addWidget(self.displayed_ids)
 
         layout.addStretch()
 
-        self.clicked_id_label = QLabel("Clicked Intersection Info")
+        self.clicked_id_label = QLabel("No intersection selected")
         layout.addWidget(self.clicked_id_label)
 
         self.extract_button = QPushButton("Extract Segments")
@@ -207,7 +211,7 @@ class GUI_MLS(QMainWindow):
     def __init__(self, gdf, intersections, output):
         super().__init__()
         self.setWindowTitle("MLS UI")
-        self.setGeometry(100, 100, 900, 500)
+        self.setGeometry(100, 100, 1100, 700)
 
         self.gdf = gdf
         self.intersections = intersections

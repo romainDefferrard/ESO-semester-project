@@ -13,6 +13,7 @@ from typing import List, Tuple
 import time
 from matplotlib.path import Path
 
+from tqdm import tqdm
 
 class LasExtractor:
     def __init__(self, config: dict, input_file: str, patches: List[Patch]):
@@ -51,7 +52,6 @@ class LasExtractor:
         if not os.path.exists(self.input_file):
             logging.error(f"File not found: {self.input_file}")
             return False
-
         with laspy.open(self.input_file) as fh:
             self.las = fh.read()  # Read the file fully
             self.coords = np.vstack((self.las.x, self.las.y)).transpose()  # Extract XYZ
@@ -161,7 +161,7 @@ class LasExtractor:
 
         output_file = f"{pair_dir}/verif_encoded_flight_{flight_id}.las"
         num_points = len(self.coords)
-
+        
         # Create output LAZ file
         new_las = self.las
 
@@ -179,13 +179,10 @@ class LasExtractor:
 
         # Loop over patches
         time0 = time.time()
-        for i, patch in enumerate(patches):
-            logging.info(f"processing patch {i+1} out of {len(patches)}")
-            #_, mask = self.patch_filtering_knn_classifier(patch)
-            # _, mask = self.patch_filtering_path_contains(patch)
-
-            #selected_indices = np.where(self.coords_mask)[0]
+        for i, patch in enumerate(tqdm(patches, desc=f"Encoding flight {flight_id}", unit="patch")):
+            # logging.info(f"processing patch {i+1} out of {len(patches)}")
             selected_indices = self.fast_patch_mask(patch)
+
             for idx in selected_indices:
                 n = new_las.num_patches[idx]
 
@@ -199,39 +196,10 @@ class LasExtractor:
 
                 getattr(new_las, field_name)[idx] = patch.id
                 new_las.num_patches[idx] += 1
+
         logging.info(f"Patch extraction time: {time.time()-time0:.2f}s")
-        # Final write
         new_las.write(output_file)
-        logging.info(f"Saved encoded LAS to: {output_file}")
 
-    def patch_filtering_path_contains(self, patch: Patch) -> Tuple[np.ndarray, np.ndarray] | Tuple[None, None]:
-        """
-        Uses matplotlib.path.Path.contains_points to quickly filter points inside a polygon.
-
-        Returns:
-            Tuple of:
-            - bbox_mask: Boolean mask of points inside AABB (bounding box)
-            - inside_mask: Boolean mask of bbox points that are inside the polygon
-        """
-        polygon = patch.shapely_polygon
-        min_x, min_y, max_x, max_y = polygon.bounds
-
-        # Fast bounding box filter
-        bbox_mask = (self.coords[:, 0] >= min_x) & (self.coords[:, 0] <= max_x) & (self.coords[:, 1] >= min_y) & (self.coords[:, 1] <= max_y)
-        coords_bbox = self.coords[bbox_mask]
-
-        if len(coords_bbox) == 0:
-            return None, None
-
-        # Use matplotlib Path
-        path = Path(np.array(polygon.exterior.coords))
-        inside_mask = path.contains_points(coords_bbox)
-
-        # Store as global mask
-        self.coords_mask = np.zeros(len(self.coords), dtype=bool)
-        self.coords_mask[np.where(bbox_mask)[0][inside_mask]] = True
-
-        return bbox_mask, inside_mask
 
     def fast_patch_mask(self, patch: Patch) -> np.ndarray:
         polygon = patch.shapely_polygon

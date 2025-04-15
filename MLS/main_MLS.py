@@ -3,6 +3,7 @@ import warnings
 import argparse
 import yaml
 import sys
+import os
 
 from PyQt6.QtWidgets import QApplication
 from Utils.GUI_MLS import GUI_MLS
@@ -19,6 +20,7 @@ class MLS:
         self.filename = config["SHP_PATH"]
         self.epsg = config["EPSG"]
         self.buffer = config["BUFFER"]
+        self.threshold = config["SHARED_LENGTH"]
         self.output_path = config["OUTPUT_PATH"]
         warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -26,7 +28,18 @@ class MLS:
         self.open_file()
         self.add_buffer()
         self.intersections = self.get_intersections()
+        
+        self.save_intersections_csv()
+        
         self.run_gui()
+
+        
+    def save_intersections_csv(self):
+        # Sort and select relevant fields
+        df = self.intersections.sort_values(by="shared_length_m")[["id_1", "id_2", "shared_length_m"]]
+        output_csv = "Output/intersections_sorted_v2.csv"
+        df.to_csv(output_csv, index=False)
+        print(f"Saved sorted intersections to: {output_csv}")
 
     def run_gui(self):
         app = QApplication(sys.argv)
@@ -55,14 +68,15 @@ class MLS:
                     overlap_poly = buf1.intersection(buf2)
 
                     if not overlap_poly.is_empty:
-                        # Intersect original lines with the overlap polygon
                         line1 = self.gdf.loc[i, "geometry"].intersection(overlap_poly)
                         line2 = self.gdf.loc[j, "geometry"].intersection(overlap_poly)
-
-                        # Take union of both clipped lines (they may be on opposite sides of the polygon)
                         shared_line = line1.union(line2)
-
-                        # Get total length of shared line(s)
+                        if shared_line.is_empty:
+                            continue
+                        shared_length = shared_line.length
+                        if shared_length < 0.1:  # Avoid tiny slivers from buffer errors
+                            continue
+                        
                         shared_length = shared_line.length if not shared_line.is_empty else 0
 
                         records.append(
@@ -74,7 +88,14 @@ class MLS:
                                 "overlap_area_m2": overlap_poly.area,
                             }
                         )
+
         intersections = gpd.GeoDataFrame(records, geometry="overlap_geom", crs=self.gdf.crs)
+
+        threshold = self.threshold  # meters
+        too_short = intersections["shared_length_m"] < threshold
+        is_consecutive = intersections["id_2"] == intersections["id_1"] + 1
+        to_drop = is_consecutive & too_short
+        intersections = intersections[~to_drop]
 
         return intersections
 

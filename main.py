@@ -115,7 +115,7 @@ def run_extraction(footprint: Footprint, patches: List[List[Patch]], LAS_DIR: st
     """Exécute l'extraction des patches pour chaque paire de vols et sauvegarde les résultats dans des dossiers distincts."""
     logging.info(f"Extracting patches for all flight pairs...{footprint.superpos_flight_pairs}")
     time0 = time.time()
-    if config["EXTRACTION_MODE"] == "encoded":
+    if config["EXTRACTION_MODE"] == "Extra_Bytes":
         # --- ENCODED: one file per flight, check all patches per flight ---
         all_patches_flat = [patch for group in patches for patch in group]
 
