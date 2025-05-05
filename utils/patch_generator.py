@@ -25,7 +25,7 @@ class PatchGenerator:
         self.tol = 0.05  # tolerance parameter for the contour generation
         self.contour = None
         self.patch_id = 1
-        # Pas trouvé d'autre solution
+
         warnings.filterwarnings("ignore", category=RuntimeWarning, module="shapely.predicates")
 
         # Output
@@ -56,8 +56,8 @@ class PatchGenerator:
 
         # Convert indices to Swiss coordinates frame
         contour = np.array(
-            [self.x_mesh[contour_y, contour_x] + 25 / 2, self.y_mesh[contour_y, contour_x] - 25 / 2]
-        ).T  # Add 25/2 to get the center of the pixel
+                        [self.x_mesh[contour_y, contour_x] + 25 / 2, self.y_mesh[contour_y, contour_x] - 25 / 2]
+                        ).T  # Add 25/2 to get the center of the pixel
         self.contours_list.append(contour)
 
     def get_centerline(self, superpos_zone: np.ndarray) -> None:

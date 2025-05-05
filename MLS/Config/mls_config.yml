@@ -6,5 +6,4 @@ OUTPUT_PATH: "Output/Extracted_segments.csv"
 BUFFER: 10
 EPSG: 2056
 
-SHARED_LENGTH: 30
 

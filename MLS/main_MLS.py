@@ -20,7 +20,7 @@ class MLS:
         self.filename = config["SHP_PATH"]
         self.epsg = config["EPSG"]
         self.buffer = config["BUFFER"]
-        self.threshold = config["SHARED_LENGTH"]
+        self.threshold = 2.5*self.buffer
         self.output_path = config["OUTPUT_PATH"]
         warnings.filterwarnings("ignore", category=RuntimeWarning)
 
@@ -29,7 +29,7 @@ class MLS:
         self.add_buffer()
         self.intersections = self.get_intersections()
         
-        self.save_intersections_csv()
+        #self.save_intersections_csv()
         
         self.run_gui()
 
@@ -37,7 +37,7 @@ class MLS:
     def save_intersections_csv(self):
         # Sort and select relevant fields
         df = self.intersections.sort_values(by="shared_length_m")[["id_1", "id_2", "shared_length_m"]]
-        output_csv = "Output/intersections_sorted_v2.csv"
+        output_csv = "Output/intersections_sorted_20.csv"
         df.to_csv(output_csv, index=False)
         print(f"Saved sorted intersections to: {output_csv}")
 
@@ -55,7 +55,7 @@ class MLS:
         self.gdf = self.gdf.to_crs(epsg=self.epsg)
 
     def add_buffer(self):
-        self.gdf["buffer"] = self.gdf.geometry.buffer(10)
+        self.gdf["buffer"] = self.gdf.geometry.buffer(self.buffer)
 
     def get_intersections(self):
         records = []
@@ -74,7 +74,7 @@ class MLS:
                         if shared_line.is_empty:
                             continue
                         shared_length = shared_line.length
-                        if shared_length < 0.1:  # Avoid tiny slivers from buffer errors
+                        if shared_length < self.threshold:  # Pas dingue encore.. 
                             continue
                         
                         shared_length = shared_line.length if not shared_line.is_empty else 0
@@ -98,6 +98,8 @@ class MLS:
         intersections = intersections[~to_drop]
 
         return intersections
+    
+    
 
 
    

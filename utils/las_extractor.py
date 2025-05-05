@@ -152,7 +152,7 @@ class LasExtractor:
         if self.extraction_mode == "independent":
             for patch in patches:
                 self.extract_patch(patch, output_dir, flight_id, pair_dir)
-        elif self.extraction_mode == "encoded":
+        elif self.extraction_mode == "Extra_Bytes":
             self.encode_patches_dynamic(patches, output_dir, flight_id, pair_dir)
         else:
             raise ValueError(f"Unknown extraction mode: {self.extraction_mode}")

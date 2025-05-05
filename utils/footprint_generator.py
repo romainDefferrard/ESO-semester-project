@@ -19,7 +19,7 @@ class Footprint:
         self.lidar_scan_mode = config["LIDAR_SCAN_MODE"]  # 'left', 'right', 'across'
         self.lidar_tilt_angle = config["LIDAR_TILT_ANGLE"]  # [deg] tilt angle from across track 0deg tilt
         self.lidar_fov = config["LIDAR_FOV"]
-        self.sampling_interval = config["FLIGHT_SAMPLING"]
+        self.sampling_interval = config["FLIGHT_DOWNSAMPLING"]
         self.buffer_dist = config["POSITION_BUFFER"]
 
         # Masks
@@ -37,8 +37,8 @@ class Footprint:
         tasks = self.create_tasks()
 
         with Pool() as pool:
-            results = pool.starmap(self.get_footprint, tasks)  # footprint_init (across track basique) ou footprint (avec scan incliné)
-
+            results = pool.starmap(self.get_footprint, tasks)  
+            
         results.sort(key=lambda x: x[0])  # Sort by flight_key so we append masks in right orders
 
         for flight_key, observed_mask in results:
@@ -143,31 +143,3 @@ class Footprint:
 
         return flight_key, observed_mask
 
-    def plot_zones(self, mask_i: np.ndarray, mask_j: np.ndarray, combined: np.ndarray, flights: Dict[str, dict]) -> None:
-
-        fig, ax = plt.subplots(figsize=(10, 8))
-
-        # Plot the terrain
-        ax.pcolormesh(self.x_mesh, self.y_mesh, self.raster_map, cmap="Greens", alpha=0.7)
-
-        # Overlay the observed mask in red
-        ax.pcolormesh(self.x_mesh, self.y_mesh, np.where(mask_i, self.raster_map, np.nan), cmap="Reds")
-        ax.pcolormesh(self.x_mesh, self.y_mesh, np.where(mask_j, self.raster_map, np.nan), cmap="Blues")
-        # ax.pcolormesh(
-        #    self.x_mesh, self.y_mesh, np.where(combined, self.raster_map, np.nan), cmap='Reds', shading='auto'
-        # )
-
-        # Plus ajouter quelque chose qui génère le bon nombre de couleur en fonction du nombre de vols
-        # qu'on a...
-        colors = ["blue", "purple", "green"]
-        for i, (flight_key, flight_data) in enumerate(self.flights.items()):
-
-            ax.scatter(flight_data["lon"], flight_data["lat"], color=colors[i % len(colors)], label=f"{flight_key} path", s=5)
-
-        # Adding labels and title
-        ax.set_xlabel("East (m)")
-        ax.set_ylabel("North (m)")
-        ax.set_aspect("equal")
-        ax.legend()
-
-        plt.show()

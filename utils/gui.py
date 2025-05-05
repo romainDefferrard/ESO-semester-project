@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFrame, QCheckBox
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QFileDialog, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFrame, QCheckBox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import numpy as np
@@ -142,8 +142,15 @@ class ControlPanel(QWidget):
         self.layout_dividerLine(layout)
 
         # Showing output directory
-        self.output_label = QLabel(f"Output folder: {self.output_dir.split('/')[-1]}")
-        layout.addWidget(self.output_label)
+        output_layout = QHBoxLayout()
+        self.output_lineedit = QLineEdit(self.output_dir)
+        output_layout.addWidget(self.output_lineedit)
+
+        self.output_browse_btn = QPushButton("Browse")
+        self.output_browse_btn.clicked.connect(self.select_output_folder)
+        output_layout.addWidget(self.output_browse_btn)
+
+        layout.addLayout(output_layout)
 
         layout.addStretch()
 
@@ -164,6 +171,13 @@ class ControlPanel(QWidget):
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
         layout.addWidget(divider)
+        
+    def select_output_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Output Directory", self.output_dir)
+        if folder:
+            self.output_dir = folder
+            self.output_lineedit.setText(folder)
+            self.parent().output_dir = folder  # propagate change back to main window if needed
 
     def toggle_band_mode(self, state):
         """Enable/Disable sampling distance and patch length based on checkbox state."""

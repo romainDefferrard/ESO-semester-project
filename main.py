@@ -5,7 +5,6 @@ import multiprocessing as mp
 import os
 import sys
 import time
-from collections import defaultdict
 from multiprocessing import Pool
 from typing import List, Tuple
 import numpy as np
@@ -19,6 +18,7 @@ from utils.las_extractor import LasExtractor
 from utils.patch_generator import PatchGenerator
 from utils.patch_model import Patch
 from utils.raster_loader import RasterLoader
+
 
 # Configuration
 parser = argparse.ArgumentParser()
@@ -75,7 +75,7 @@ def run_gui(footprint: Footprint, patches_all: List, centerlines_all: List, cont
     window.show()
     app.exec()
 
-    return window.control_panel.extraction_state, window.control_panel.new_patches_instance
+    return window.control_panel.extraction_state, window.control_panel.new_patches_instance, window.control_panel.output_dir
 
 
 def tasks_extraction(footprint: Footprint, patches: List[List[Patch]], LAS_DIR: str, OUTPUT_DIR: str) -> List[Tuple[str, str, Footprint, List, str, str]]:
@@ -91,8 +91,6 @@ def process_flight(flight_id: str, flight_patch: List, LAS_DIR: str, OUTPUT_DIR:
 
     if extractor.read_point_cloud():
         extractor.process_all_patches(flight_patch, OUTPUT_DIR, flight_id, pair_dir)
-
-    # logging.info(f"Flight {flight_id} extraction completed.")
 
 
 def extract_flight_pair(flight_i: str, flight_j: str, footprint: Footprint, patches: List[List[Patch]], LAS_DIR: str, OUTPUT_DIR: str) -> None:
@@ -148,15 +146,10 @@ def main() -> None:
     # Create PatchGenerator instance with all superposition zones
     pg = PatchGenerator(superpos_zones=footprint.superpos_masks, raster_mesh=raster_mesh, raster=raster, patch_params=config["PATCH_DIMS"])
 
-    # Now, pg contains all the patches instances, centerlines and contours 
-    patches = pg.patches_list
-    centerlines = pg.centerlines_list  # All centerlines
-    contours = pg.contours_list  # All contours
-
     # Run GUI with all patches, centerlines, and contours
-    extraction_state, new_patches_instance = run_gui(footprint, patches, centerlines, contours, raster, raster_mesh)
+    extraction_state, new_patches_instance, updated_output_dir = run_gui(footprint, pg.patches_list, pg.centerlines_list, pg.contours_list, raster, raster_mesh)
     if extraction_state:
-        run_extraction(footprint, new_patches_instance, LAS_DIR, OUTPUT_DIR)
+        run_extraction(footprint, new_patches_instance, LAS_DIR, updated_output_dir)
     else:
         logging.info("Window closed without extraction.")
 

@@ -8,7 +8,11 @@ LAS_DIR: "Data/Vallet2020/ALS_line{flight_id}.txt"
 LOG_DIR: "Data/Vallet2020/GPS_Times.json"
 
 # Parameters
-DATASET_NAME: "Vallet" # Options: "Arpette", "Vallet"
+DAY_OF_WEEK: 0
+
+# DTM
+RASTER_BUFFER: 250 # Buffer for the raster generation around the min/max North/East position of the trajectories [m]
+
 
 # Lidar scanning mode 
 LIDAR_SCAN_MODE: "across" # Options: "across", "left", "right" 
@@ -20,7 +24,7 @@ PAIR_MODE: "successive" # Options: "successive", "all". Successive: only generat
 PATCH_DIMS: [100, 150, 400] # [length, width, height] [m]
 
 # Footprint
-FLIGHT_SAMPLING: 10 # Take a flight position every 10 coordinates in the trajectory file
+FLIGHT_DOWNSAMPLING: 10 # Take a flight position every 10 coordinates in the trajectory file
 POSITION_BUFFER: 12.5 # the projected forward and backward distance from the flight position to consider for the footprint
 
 # Extraction

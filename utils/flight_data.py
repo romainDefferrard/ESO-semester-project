@@ -2,6 +2,7 @@ import json
 import pandas as pd
 import os
 import numpy as np
+import logging
 
 
 class FlightData:
@@ -10,7 +11,8 @@ class FlightData:
         self.las_dir = config["LAS_DIR"]
         self.log_dir = config["LOG_DIR"]
         self.trajectory_path = config["TRAJECTORY_PATH"]
-        self.dataset_name = config["DATASET_NAME"]
+        #self.dataset_name = config["DATASET_NAME"]
+        self.dow = config["DAY_OF_WEEK"]
 
         self.flights = {}  # Store extracted flights
         self.bounds = []  # Store E/N - min/max coordinates for each flight
@@ -25,87 +27,91 @@ class FlightData:
         # Load time intervals and extract flights
         self.load_flights()
 
+    
     def extract_flight_times(self):
-        if self.dataset_name == "Arpette":
-            self.flight_times = self.extract_flight_times_arpette()
-        elif self.dataset_name == "Vallet":
-            self.flight_times = self.extract_flight_times_vallet()
-        else:
-            raise ValueError(f"Unsupported dataset: {self.dataset_name}")
-
-        return self.flight_times
-
-    def extract_flight_times_arpette(self):
         """
-        Extract flight start and end times from corresponding .sdc.log files.
+        Extract flight start and end times:
+        - From .sdc.log files for .las/.laz
+        - From GPS_Times.json for .txt/.TXYZS
 
-        :return: Dictionary with flight IDs as keys and (start, end) timestamps as values.
+        :return: Dictionary {flight_id: {"start": ..., "end": ...}}
+        :raises ValueError: if file format is unknown
         """
-        flight_times = {}
-        flight_ids = []
+        # Determine file format
+        if "." not in self.las_dir:
+            raise ValueError(f"Unable to determine file format from path: {self.las_dir}")
+        
+        self.file_format = self.las_dir.split(".")[-1].lower()
 
-        directory = os.path.dirname(self.las_dir)
-        for filename in os.listdir(directory):
-            if filename.endswith(".laz"):
-                flight_name = filename.split(".")[0]  # Extract numeric part before file format
-                flight_id = flight_name.split("_")[-1]
-                flight_ids.append(flight_id)
+        if self.file_format in ["las", "laz"]:
+            flight_times = {}
+            flight_ids = []
 
-        flight_ids.sort()
+            directory = os.path.dirname(self.las_dir)
+            for filename in os.listdir(directory):
+                if filename.endswith(".laz"):
+                    flight_name = filename.split(".")[0]
+                    flight_id = flight_name.split("_")[-1]
+                    flight_ids.append(flight_id)
 
-        log_file_pattern = os.path.basename(self.log_dir)
-        directory_log = os.path.join(directory, "timestamps")
-        for flight_id in flight_ids:
-            log_file = log_file_pattern.format(flight_id=flight_id)
+            flight_ids.sort()
+            directory_log = os.path.join(directory, "timestamps")
+            log_file_pattern = os.path.basename(self.log_dir)
 
-            log_file_path = os.path.join(directory_log, log_file)
+            for flight_id in flight_ids:
+                log_file = log_file_pattern.format(flight_id=flight_id)
+                log_file_path = os.path.join(directory_log, log_file)
 
-            if os.path.exists(log_file_path):
+                if not os.path.exists(log_file_path):
+                    logging.warning(f"Missing log file: {log_file_path}")
+                    continue
+
                 with open(log_file_path, "r", encoding="ISO-8859-1") as f:
                     lines = f.readlines()
 
-                start_time = None
-                end_time = None
+                try:
+                    start_time_line = lines[136].strip()
+                    end_time_line = lines[137].strip()
+                    if "File start" in start_time_line and "File end" in end_time_line:
+                        start_time = float(start_time_line.split("(")[1].split()[0])
+                        end_time = float(end_time_line.split("(")[1].split()[0])
+                        flight_times[flight_id] = {"start": start_time, "end": end_time}
+                    else:
+                        logging.warning(f"Unexpected format in log file: {log_file_path}")
+                except IndexError:
+                    logging.warning(f"Log file too short or malformed: {log_file_path}")
+                except (ValueError, IndexError) as e:
+                    logging.warning(f"Failed to parse times from {log_file_path}: {e}")
 
-                # Extract start time from line 137
-                start_time_line = lines[136].strip()
-                if "File start" in start_time_line:
-                    start_time = float(start_time_line.split("(")[1].split()[0])  # A voir si on garde juste un int() ou float()
+            return flight_times
 
-                # Extract end time from line 138
-                end_time_line = lines[137].strip()
-                if "File end" in end_time_line:
-                    end_time = float(end_time_line.split("(")[1].split()[0])  # Extract time before 's'
+        elif self.file_format in ["txt", "TXYZS"]:
+            if not os.path.exists(self.log_dir):
+                raise FileNotFoundError(f"GPS_Times.json not found at {self.log_dir}")
 
-                if start_time is not None and end_time is not None:
+            with open(self.log_dir, "r") as f:
+                flight_times_json = json.load(f)
+
+            flight_times = {}
+            for flight_name, times in flight_times_json.get("flight_intervals", {}).items():
+                try:
+                    flight_id = flight_name.split("_")[-1]
+                    start_time = float(times["start_time"])
+                    end_time = float(times["end_time"])
                     flight_times[flight_id] = {"start": start_time, "end": end_time}
+                except (KeyError, ValueError) as e:
+                    logging.warning(f"Invalid or missing time data for flight '{flight_name}': {e}")
 
-        return flight_times
+            return flight_times
 
-    def extract_flight_times_vallet(self):
-        """Load flight timestamps from `GPS_Times.json` for Vallet dataset."""
-        if not os.path.exists(self.log_dir):
-            raise FileNotFoundError(f"GPS_Times.json not found at {self.log_dir}")
-
-        with open(self.log_dir, "r") as f:
-            flight_times_json = json.load(f)
-
-        flight_times = {}
-        for flight_name, times in flight_times_json["flight_intervals"].items():
-            try:
-                flight_id = flight_name.split("_")[-1]
-                start_time = float(times["start_time"])
-                end_time = float(times["end_time"])
-                flight_times[flight_id] = {"start": start_time, "end": end_time}
-            except (KeyError, ValueError):
-                print(f"Warning: Missing or invalid time data for flight {flight_id}")
-
-        return flight_times
-
+        else:
+            raise ValueError(f"Unsupported file format: {self.file_format}")
+            
+    
     def load_flight_data(self):
-        if self.dataset_name == "Arpette":
+        if self.file_format in ["las", "laz"]:
             cols = ["gps_time", "lon", "lat", "alt", "roll", "pitch", "yaw", "?"]
-        elif self.dataset_name == "Vallet":
+        else:
             cols = [
                 "gps_time",
                 "lon",
@@ -121,14 +127,9 @@ class FlightData:
     def load_flights(self):
 
         all_flight_data = []
-        if self.dataset_name == "Arpette":
-            day_of_week = 3
-        elif self.dataset_name == "Vallet":
-            day_of_week = 0
 
         for flight_id, interval in self.flight_times.items():
-            start, end = int(interval["start"]) + day_of_week * 24 * 3600, int(interval["end"]) + day_of_week * 24 * 3600  # Change depending on the DOW
-
+            start, end = int(interval["start"]) + self.dow * 24 * 3600, int(interval["end"]) + self.dow * 24 * 3600  # Change depending on the DOW
             flight_data = self.flight_df[(self.flight_df["gps_time"] >= start) & (self.flight_df["gps_time"] <= end)]
             flight_name = f"Flight_{flight_id}"  # Create a name based on flight_id
 

@@ -6,8 +6,9 @@ from typing import Tuple, List
 class RasterLoader:
     def __init__(self, config: dict, flight_bounds: List[float]) -> None:
         self.file_path = config["MNT_PATH"]
+        self.buffer = config["RASTER_BUFFER"]
         self.flight_bounds = flight_bounds
-
+        
         self.map_bounds = {}
 
         self.raster: np.ndarray
@@ -39,9 +40,7 @@ class RasterLoader:
             return self.raster
 
     def compute_map_bounds(self) -> None:
-        # MODIFIER
-        # get max diff flight/map
-        # to compute FOV and add ± to bounds
-        coef = np.array([-1000, 1000, -1000, 1000])
+    
+        buffer_coef = np.array([-self.buffer, self.buffer, -self.buffer, self.buffer])
         bounds_array = np.array(self.flight_bounds)
-        self.map_bounds = bounds_array + coef
+        self.map_bounds = bounds_array + buffer_coef
