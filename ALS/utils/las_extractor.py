@@ -153,52 +153,59 @@ class LasExtractor:
             for patch in patches:
                 self.extract_patch(patch, output_dir, flight_id, pair_dir)
         elif self.extraction_mode == "Extra_Bytes":
-            self.encode_patches_dynamic(patches, output_dir, flight_id, pair_dir)
+            self.encode_patches_dynamic(patches, flight_id, output_dir)
         else:
             raise ValueError(f"Unknown extraction mode: {self.extraction_mode}")
 
-    def encode_patches_dynamic(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
-
-        output_file = f"{pair_dir}/verif_encoded_flight_{flight_id}.las"
-        num_points = len(self.coords)
+    def encode_patches_dynamic(self, patches: List[Patch], flight_id: str, output_dir: str) -> None:
         
-        # Create output LAZ file
-        new_las = self.las
+        output_file = f"{output_dir}/output_flight_{flight_id}.laz"
+        num_points = len(self.coords)
 
+        new_las = self.las
         for dim in self.las.point_format.dimension_names:
             setattr(new_las, dim, getattr(self.las, dim))
 
-        # Initialize num_patches
+        # Init fields
         new_las.add_extra_dim(ExtraBytesParams(name="num_patches", type=np.uint8))
         new_las.num_patches = np.zeros(num_points, dtype=np.uint8)
 
-        # Initialize first patch_id column
         new_las.add_extra_dim(ExtraBytesParams(name="patch_ids_1", type=np.uint8))
         new_las.patch_ids_1 = np.zeros(num_points, dtype=np.uint8)
-        max_patch_columns = 1  # tracking how many patch_ids_X exist
 
-        # Loop over patches
-        time0 = time.time()
-        for i, patch in enumerate(tqdm(patches, desc=f"Encoding flight {flight_id}", unit="patch")):
-            # logging.info(f"processing patch {i+1} out of {len(patches)}")
+        created_fields = {"patch_ids_1"}
+        field_data = {"patch_ids_1": new_las["patch_ids_1"]}
+
+        t0 = time.time()
+        for i, patch in enumerate(tqdm(patches, desc=f"Masking flight {flight_id}", unit="patch")):
             selected_indices = self.fast_patch_mask(patch)
 
-            for idx in selected_indices:
-                n = new_las.num_patches[idx]
+            levels = new_las.num_patches[selected_indices].copy()
+            new_las.num_patches[selected_indices] += 1  
 
-                field_name = f"patch_ids_{n + 1}"
+            for level in np.unique(levels):
+                idxs = selected_indices[levels == level]
+                field_name = f"patch_ids_{level + 1}"
+            #    print(patch.id, level, len(idxs), field_name)
 
-                if not hasattr(new_las, field_name):
+                if field_name not in created_fields:
                     new_las.add_extra_dim(ExtraBytesParams(name=field_name, type=np.uint8))
-                    setattr(new_las, field_name, np.zeros(num_points, dtype=np.uint8))
-                    logging.info(f"Created new field: {field_name}")
-                    max_patch_columns += 1
+                    new_las[field_name] = np.zeros(num_points, dtype=np.uint8)
+                    field_data[field_name] = new_las[field_name]
+                    created_fields.add(field_name)
+                    #logging.info(f"Created field: {field_name}")
 
-                getattr(new_las, field_name)[idx] = patch.id
-                new_las.num_patches[idx] += 1
+            #    field_data[field_name][idxs] = patch.id
+                new_las[field_name][idxs] = patch.id
+        t1 = time.time()
+        logging.info(f"Total time for masking & writing: {t1 - t0:.2f}s")
 
-        logging.info(f"Patch extraction time: {time.time()-time0:.2f}s")
+        # Writing
+        t2 = time.time()
         new_las.write(output_file)
+        t3 = time.time()
+        logging.info(f"Time to write LAS file: {t3 - t2:.2f}s")
+
 
 
     def fast_patch_mask(self, patch: Patch) -> np.ndarray:
@@ -231,3 +238,5 @@ class LasExtractor:
         full_indices = np.where(bbox_mask)[0][inside_mask]
  
         return full_indices
+
+
