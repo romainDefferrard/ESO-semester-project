@@ -135,7 +135,7 @@ class LasExtractor:
         self.header = copy.deepcopy(self.las.header)
         self.header.point_count = np.sum(self.coords_mask)
 
-    def extract_patch(self, patch: Patch, output_dir: str, flight_id: str, pair_dir: str):
+    def extract_patch(self, patch: Patch, flight_id: str, pair_dir: str):
         """Extracts a single patch"""
         output_file = f"{pair_dir}/patch_{patch.id}_flight_{flight_id}.{self.file_format}"
         bbox_mask, mask = self.patch_filtering_knn_classifier(patch)
@@ -151,7 +151,8 @@ class LasExtractor:
     def process_all_patches(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
         if self.extraction_mode == "independent":
             for patch in patches:
-                self.extract_patch(patch, output_dir, flight_id, pair_dir)
+                os.makedirs(pair_dir, exist_ok=True)
+                self.extract_patch(patch, flight_id, pair_dir)
         elif self.extraction_mode == "Extra_Bytes":
             self.encode_patches_dynamic(patches, flight_id, output_dir)
         else:
@@ -186,16 +187,13 @@ class LasExtractor:
             for level in np.unique(levels):
                 idxs = selected_indices[levels == level]
                 field_name = f"patch_ids_{level + 1}"
-            #    print(patch.id, level, len(idxs), field_name)
 
                 if field_name not in created_fields:
                     new_las.add_extra_dim(ExtraBytesParams(name=field_name, type=np.uint8))
                     new_las[field_name] = np.zeros(num_points, dtype=np.uint8)
                     field_data[field_name] = new_las[field_name]
                     created_fields.add(field_name)
-                    #logging.info(f"Created field: {field_name}")
 
-            #    field_data[field_name][idxs] = patch.id
                 new_las[field_name][idxs] = patch.id
         t1 = time.time()
         logging.info(f"Total time for masking & writing: {t1 - t0:.2f}s")
