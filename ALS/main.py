@@ -84,12 +84,8 @@ def get_flight_union_contour(flight_id: str, superpos_pairs: List[Tuple[str, str
                 polygons.append(contour)
     return unary_union(polygons) if polygons else Polygon()
 
-def tasks_extraction(footprint: Footprint, patches: List[List[Patch]], LAS_DIR: str, OUTPUT_DIR: str) -> List[Tuple[str, str, Footprint, List, str, str]]:
-    return [(flight_i, flight_j, footprint, patches, LAS_DIR, OUTPUT_DIR) for flight_i, flight_j in footprint.superpos_flight_pairs]
-
 def process_flight(flight_id: str, flight_patch: List[Patch], LAS_DIR: str, OUTPUT_DIR: str, pair_dir: str,
                    superpos_pairs: List[Tuple[str, str]], contours_all: List[np.ndarray]) -> None:
-    
     timer.start(f"Flight {flight_id} processing")
     input_file = LAS_DIR.format(flight_id=flight_id)
     flight_polygon = get_flight_union_contour(flight_id, superpos_pairs, contours_all)
@@ -100,17 +96,6 @@ def process_flight(flight_id: str, flight_patch: List[Patch], LAS_DIR: str, OUTP
     if extractor.read_point_cloud():
         extractor.process_all_patches(relevant_patches, OUTPUT_DIR, flight_id, pair_dir)
     timer.stop(f"Flight {flight_id} processing")
-
-def extract_flight_pair(flight_i: str, flight_j: str, footprint: Footprint, patches: List[List[Patch]], LAS_DIR: str, OUTPUT_DIR: str) -> None:
-    pair_index = footprint.superpos_flight_pairs.index((flight_i, flight_j))
-    patch_group = patches[pair_index]
-    pair_dir = f"{OUTPUT_DIR}/Flights_{flight_i}_{flight_j}"
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        executor.submit(process_flight, flight_i, patch_group, LAS_DIR, OUTPUT_DIR, pair_dir, footprint.superpos_flight_pairs, [])
-        executor.submit(process_flight, flight_j, patch_group, LAS_DIR, OUTPUT_DIR, pair_dir, footprint.superpos_flight_pairs, [])
-
-    logging.info(f"Extraction completed for flights {flight_i} and {flight_j}.")
 
 def run_extraction(footprint: Footprint, patches: List[List[Patch]], LAS_DIR: str, OUTPUT_DIR: str,
                    contours_all: List[np.ndarray]) -> None:
@@ -127,11 +112,14 @@ def run_extraction(footprint: Footprint, patches: List[List[Patch]], LAS_DIR: st
 
         for args in tasks:
             process_flight(*args)
-    else:
-        tasks = tasks_extraction(footprint, patches, LAS_DIR, OUTPUT_DIR)
-        num_outer_processes = max(1, mp.cpu_count() // 2)
-        with Pool(processes=num_outer_processes) as pool:
-            pool.starmap(extract_flight_pair, tasks)
+    elif config["EXTRACTION_MODE"] == "independent":
+        for (flight_i, flight_j), patch_group in zip(footprint.superpos_flight_pairs, patches):
+            for flight_id in [flight_i, flight_j]:
+                pair_dir = f"{OUTPUT_DIR}/Flights_{flight_i}_{flight_j}"
+                os.makedirs(pair_dir, exist_ok=True)
+                process_flight(flight_id, patch_group, LAS_DIR, OUTPUT_DIR, pair_dir, footprint.superpos_flight_pairs, contours_all)
+
+    
 
     timer.stop("Patch extraction (all flights)")
 

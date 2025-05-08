@@ -148,6 +148,7 @@ class LasExtractor:
         else:
             self.write_las(output_file)
 
+
     def process_all_patches(self, patches: List[Patch], output_dir: str, flight_id: str, pair_dir: str) -> None:
         if self.extraction_mode == "independent":
             for patch in patches:
