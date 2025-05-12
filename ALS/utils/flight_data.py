@@ -1,3 +1,19 @@
+"""
+Filename: flight_data.py
+Author: Romain Defferrard
+Date: 08-05-2025
+
+Description:
+    This script handles the extraction and organization of flight data from trajectory files.
+    It sequences the flight lines from time intervals and the bounds coordinates of all flights 
+    are computed for further processing of DTM loading
+
+    Main features:
+    - Extract flight start/end times from .log or JSON.
+    - Load trajectory data 
+    - Slice trajectories into individual flights.
+    - Compute spatial bounds of all flight data.
+"""
 import json
 import pandas as pd
 import os
@@ -7,21 +23,32 @@ import logging
 
 class FlightData:
     def __init__(self, config):
+        """
+        Initializes the FlightData object with configuration and loads flight data.
 
+        Input:
+            config (dict): Configuration dictionary.
+                - LAS_DIR (str): Template path to LAS/LAZ or ASCII files.
+                - LOG_DIR (str): Path to log files or JSON metadata.
+                - TRAJECTORY_PATH (str): Path to the full trajectory .csv/.txt file.
+                - DAY_OF_WEEK (int): Day offset used for GPS time correction.
+
+        Output:
+            - self.flights (dict[str, pd.DataFrame]): Flight data per ID.
+            - self.bounds (list[float]): Combined E/N bounds across all flights.
+        """
         self.las_dir = config["LAS_DIR"]
         self.log_dir = config["LOG_DIR"]
         self.trajectory_path = config["TRAJECTORY_PATH"]
-        #self.dataset_name = config["DATASET_NAME"]
         self.dow = config["DAY_OF_WEEK"]
 
         self.flights = {}  # Store extracted flights
         self.bounds = []  # Store E/N - min/max coordinates for each flight
-        self.center = []  # center of mass E,N
 
         # Extract flight_times
         self.flight_times = self.extract_flight_times()
 
-        # Load full flight data from csv/txt
+        # Load full flight data 
         self.flight_df = self.load_flight_data()
 
         # Load time intervals and extract flights
@@ -30,14 +57,18 @@ class FlightData:
     
     def extract_flight_times(self):
         """
-        Extract flight start and end times:
-        - From .sdc.log files for .las/.laz
-        - From GPS_Times.json for .txt/.TXYZS
+        Extracts flight start/end times from log or JSON metadata depending on file format.
 
-        :return: Dictionary {flight_id: {"start": ..., "end": ...}}
-        :raises ValueError: if file format is unknown
+        Input:
+            None (uses self.las_dir and self.log_dir internally)
+
+        Output:
+            dict[str, dict[str, float]]: Flight time intervals per ID, formatted as:
+                {"flight_id": {"start": float, "end": float}, ...}
+
+        Raises:
+            ValueError: If file format is unknown or unsupported.
         """
-        # Determine file format
         if "." not in self.las_dir:
             raise ValueError(f"Unable to determine file format from path: {self.las_dir}")
         
@@ -109,27 +140,37 @@ class FlightData:
             
     
     def load_flight_data(self):
+        """
+        Loads the full trajectory data file as a pandas DataFrame.
+
+        Input:
+            None (uses self.trajectory_path)
+
+        Output:
+            pd.DataFrame: Full trajectory data.
+        """
         if self.file_format in ["las", "laz"]:
-            cols = ["gps_time", "lon", "lat", "alt", "roll", "pitch", "yaw", "?"]
+            cols = ["gps_time","lon","lat","alt","roll","pitch","yaw","?"]
         else:
-            cols = [
-                "gps_time",
-                "lon",
-                "lat",
-                "alt",
-                "roll",
-                "pitch",
-                "yaw",
-            ]
+            cols = ["gps_time","lon","lat","alt","roll","pitch","yaw"]
 
         return pd.read_csv(self.trajectory_path, names=cols, header=None)
 
     def load_flights(self):
+        """
+        Filters the full trajectory data per extracted flight time intervals.
 
+        Input:
+            None
+
+        Output:
+            None, but populates self.flights dictionary and updates self.bounds.
+        """
         all_flight_data = []
 
         for flight_id, interval in self.flight_times.items():
-            start, end = int(interval["start"]) + self.dow * 24 * 3600, int(interval["end"]) + self.dow * 24 * 3600  # Change depending on the DOW
+            # Change depending on the dow (Day Of Week)
+            start, end = int(interval["start"]) + self.dow * 24 * 3600, int(interval["end"]) + self.dow * 24 * 3600  
             flight_data = self.flight_df[(self.flight_df["gps_time"] >= start) & (self.flight_df["gps_time"] <= end)]
             flight_name = f"Flight_{flight_id}"  # Create a name based on flight_id
 
@@ -141,6 +182,15 @@ class FlightData:
         self.compute_flight_bounds(all_flight_data)
 
     def compute_flight_bounds(self, flight_data):
+        """
+        Computes overall E/N bounds from concatenated flight data.
+
+        Input:
+            flight_data (list[pd.DataFrame]): List of flight-specific DataFrames.
+
+        Output:
+            None (updates self.bounds)
+        """
         combined_data = pd.concat(flight_data, ignore_index=True)
         E_min, E_max = combined_data["lon"].min(), combined_data["lon"].max()
         N_min, N_max = combined_data["lat"].min(), combined_data["lat"].max()

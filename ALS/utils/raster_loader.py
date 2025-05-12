@@ -1,10 +1,37 @@
+"""
+Filename: raster_loader.py
+Author: Romain Defferrard
+Date: 08-05-2025
+
+Description:
+    This module defines the RasterLoader class, which loads a buffered subsection of a raster (DTM)
+    corresponding to the spatial extent of multiple flights. It uses rasterio to read data and
+    produces both the raster values and a coordinate meshgrid for further processing.
+
+    The main output is an instance providing:
+        - self.raster: 2D numpy array of elevation values.
+        - self.x_mesh, self.y_mesh: 2D arrays of Swiss projected coordinates (e.g., LV95 or LV03).
+        - self.map_bounds: Buffered bounding box derived from flight area.
+"""
 import rasterio
 import numpy as np
-from typing import Tuple, List
+from typing import List
 
 
 class RasterLoader:
     def __init__(self, config: dict, flight_bounds: List[float]) -> None:
+        """
+        Initializes RasterLoader and loads the raster.
+
+        Input:
+            config (dict): configuration dictionary.
+                - MNT_PATH (str): Path to raster file.
+                - RASTER_BUFFER (float): Buffer distance [m].
+            flight_bounds (list[float]): [E_min, E_max, N_min, N_max] bounds of flight area.
+
+        Output:
+            None (but sets self.raster, self.x_mesh, self.y_mesh, self.map_bounds)
+        """
         self.file_path = config["MNT_PATH"]
         self.buffer = config["RASTER_BUFFER"]
         self.flight_bounds = flight_bounds
@@ -15,12 +42,20 @@ class RasterLoader:
         self.x_mesh: np.ndarray
         self.y_mesh: np.ndarray
 
-        self.compute_map_bounds()  # still need to modify it
+        self.compute_map_bounds() 
         self.load()
 
     def load(self) -> np.ndarray:
-        with rasterio.open(self.file_path) as src:
+        """
+        Loads the raster window corresponding to the buffered map bounds.
 
+        Input:
+            None
+
+        Output:
+            np.ndarray: The clipped raster values inside the buffered bounds.
+        """
+        with rasterio.open(self.file_path) as src:
             # Get raster resolution (pixel size in x and y)
             res_x, res_y = src.res
             # Ensure correct number of points in x/y
@@ -40,7 +75,15 @@ class RasterLoader:
             return self.raster
 
     def compute_map_bounds(self) -> None:
-    
+        """
+        Computes a buffered bounding box around the flight area.
+
+        Input:
+            None
+
+        Output:
+            None (updates self.map_bounds as [E_min, E_max, N_min, N_max])
+        """
         buffer_coef = np.array([-self.buffer, self.buffer, -self.buffer, self.buffer])
         bounds_array = np.array(self.flight_bounds)
         self.map_bounds = bounds_array + buffer_coef

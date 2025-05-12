@@ -1,14 +1,29 @@
+"""
+Filename: footprint_generator.py
+Author: Romain Defferrard
+Date: 08-05-2025
+
+Description:
+    This module defines the Footprint class, which computes observed raster zones for a set of flight trajectories
+    using LiDAR scanning geometry. It generates boolean masks indicating which parts of the raster are visible
+    from each flight, based on scan direction, field of view, tilt, and altitude. It finally identifies zones observed 
+    by multiple flights (superpositions).
+    
+    The main outputs are:
+        - self.observed_masks: List[np.ndarray] of boolean masks (one per flight).
+        - self.superpos_masks: List[np.ndarray] of boolean masks (one per flight pair).
+        - self.superpos_flight_pairs: List[Tuple[str, str]] flight ID pairs used in superposition analysis.
+"""
 import numpy as np
-import matplotlib.pyplot as plt
 from itertools import combinations, pairwise
 from multiprocessing import Pool
-from typing import Dict, Tuple, List, Optional
+from typing import Dict, Tuple
 from tqdm import tqdm
-
+from shapely.geometry import Polygon
+from matplotlib.path import Path
 
 def get_footprint_wrapper(args):
-    return Footprint.get_footprint_static(*args)
-
+    return Footprint.get_footprint_fast(*args)
 
 class Footprint:
     def __init__(self, raster: np.ndarray, raster_mesh: Tuple[np.ndarray, np.ndarray], flights: Dict[str, dict], config: dict) -> None:
@@ -16,7 +31,6 @@ class Footprint:
         self.flights = flights
         self.x_mesh, self.y_mesh = raster_mesh
 
-        # Retrieve configuration parameters
         self.mode = config["PAIR_MODE"]
         self.lidar_scan_mode = config["LIDAR_SCAN_MODE"]
         self.lidar_tilt_angle = config["LIDAR_TILT_ANGLE"]
@@ -24,7 +38,6 @@ class Footprint:
         self.sampling_interval = config["FLIGHT_DOWNSAMPLING"]
         self.buffer_dist = config["POSITION_BUFFER"]
 
-        # Masks
         self.superpos_masks = []
         self.observed_masks = []
         self.superpos_flight_pairs = []
@@ -77,7 +90,7 @@ class Footprint:
             self.superpos_flight_pairs.append((flight_id_1, flight_id_2))
 
     @staticmethod
-    def get_footprint_static(
+    def get_footprint_fast(
         flight_key: str,
         flight_data: dict,
         raster_map: np.ndarray,
@@ -90,56 +103,51 @@ class Footprint:
         buffer_dist: float,
     ) -> Tuple[str, np.ndarray]:
 
-        half_fov_rad = np.radians(lidar_fov / 2)
         E = flight_data["lon"][::sampling_interval]
         N = flight_data["lat"][::sampling_interval]
         A = flight_data["alt"][::sampling_interval]
 
-        observed_mask = np.zeros_like(raster_map, dtype=bool)
+        all_polygons = []
 
-        for i, (e, n, alt) in enumerate(zip(E, N, A)):
-            trajectory_angle = np.arctan2(N.iloc[-1] - N.iloc[0], E.iloc[-1] - E.iloc[0])
+        for i in range(len(E)):
+            e, n, alt = E.iloc[i], N.iloc[i], A.iloc[i]
+
+            if i < len(E) - 1:
+                next_e, next_n = E.iloc[i+1], N.iloc[i+1]
+            else:
+                next_e, next_n = E.iloc[i-1], N.iloc[i-1]
+
+            trajectory_angle = np.arctan2(next_n - n, next_e - e)
+
+            half_fov_rad = np.radians(lidar_fov / 2)
+            tilt_rad = np.radians(lidar_tilt_angle)
 
             if lidar_scan_mode == "left":
-                scanning_angle_1 = trajectory_angle + np.pi / 2 + np.radians(lidar_tilt_angle)
-                scanning_angle_2 = trajectory_angle - np.pi / 2 + np.radians(lidar_tilt_angle)
+                angles = [trajectory_angle + np.pi/2 + tilt_rad - half_fov_rad,
+                          trajectory_angle + np.pi/2 + tilt_rad + half_fov_rad]
             elif lidar_scan_mode == "right":
-                scanning_angle_1 = trajectory_angle + np.pi / 2 - np.radians(lidar_tilt_angle)
-                scanning_angle_2 = trajectory_angle - np.pi / 2 - np.radians(lidar_tilt_angle)
+                angles = [trajectory_angle - np.pi/2 - tilt_rad - half_fov_rad,
+                          trajectory_angle - np.pi/2 - tilt_rad + half_fov_rad]
             elif lidar_scan_mode == "across":
-                scanning_angle_1 = trajectory_angle + np.pi / 2
-                scanning_angle_2 = trajectory_angle - np.pi / 2
+                angles = [trajectory_angle + np.pi/2 - half_fov_rad,
+                          trajectory_angle + np.pi/2 + half_fov_rad]
 
-            if i == 0:
-                e_avant = e + buffer_dist * np.cos(trajectory_angle)
-                n_avant = n + buffer_dist * np.sin(trajectory_angle)
-                e_arriere = e
-                n_arriere = n
-            elif i == len(E) - 1:
-                e_avant = e
-                n_avant = n
-                e_arriere = e - buffer_dist * np.cos(trajectory_angle)
-                n_arriere = n - buffer_dist * np.sin(trajectory_angle)
-            else:
-                e_avant = e + buffer_dist * np.cos(trajectory_angle)
-                n_avant = n + buffer_dist * np.sin(trajectory_angle)
-                e_arriere = e - buffer_dist * np.cos(trajectory_angle)
-                n_arriere = n - buffer_dist * np.sin(trajectory_angle)
+            max_range = 500
+            points = [(e, n)]
+            for angle in angles:
+                x = e + max_range * np.cos(angle)
+                y = n + max_range * np.sin(angle)
+                points.append((x, y))
 
-            angle_to_grid_forward = np.arctan2(y_mesh - n_avant, x_mesh - e_avant)
-            angle_to_grid_backward = np.arctan2(y_mesh - n_arriere, x_mesh - e_arriere)
+            poly = Polygon(points)
+            all_polygons.append(poly)
 
-            def is_between(angle, min_angle, max_angle):
-                return ((angle - min_angle) % (2 * np.pi)) < ((max_angle - min_angle) % (2 * np.pi))
+        union_poly = all_polygons[0]
+        for poly in all_polygons[1:]:
+            union_poly = union_poly.union(poly)
 
-            valid_scan_mask = is_between(angle_to_grid_forward, scanning_angle_1, scanning_angle_2) & \
-                              is_between(angle_to_grid_backward, scanning_angle_2, scanning_angle_1)
+        points = np.vstack((x_mesh.ravel(), y_mesh.ravel())).T
+        mask = Path(np.array(union_poly.exterior.coords)).contains_points(points)
+        mask = mask.reshape(x_mesh.shape)
 
-            horizontal_distances = np.sqrt((x_mesh - e) ** 2 + (y_mesh - n) ** 2)
-            vertical_distances = alt - raster_map
-            line_of_sight_angles = np.arctan2(horizontal_distances, vertical_distances)
-            fov_mask = np.abs(line_of_sight_angles) <= half_fov_rad
-
-            observed_mask |= valid_scan_mask & fov_mask
-
-        return flight_key, observed_mask
+        return flight_key, mask

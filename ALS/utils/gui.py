@@ -1,13 +1,38 @@
+"""
+Filename: gui.py
+Author: Romain Defferrard
+Date: 08-05-2025
+
+Description:
+    This file implements the graphical user interface using PyQt6. It provides interactive tools to display
+    overlap zones, configure patch parameters, and manually control patch extraction. It includes the following 
+    main components:
+
+    - PlotWindow: Displays the selected overlap zone, centerline, and patches.
+    - ControlPanel: GUI interface to set parameters, navigate plots, and trigger patch extraction.
+    - GUIMainWindow: Main window combining control panel and plot area.
+"""
+
+
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QFileDialog, QHBoxLayout, QPushButton, QLabel, QLineEdit, QFrame, QCheckBox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import numpy as np
 from .patch_generator import PatchGenerator
-from shapely.geometry import Polygon
 from .patch_model import Patch
 
 
 class PlotWindow(QWidget):
+    """
+    Description:
+        QWidget to display raster overlap zones, centerline, and patch geometries.
+
+    Input:
+        parent (QWidget): Reference to the main window to access shared data.
+
+    Output:
+        None
+    """
     def __init__(self, parent):
         super().__init__(parent)
         # Inherit attributes from parent
@@ -66,6 +91,19 @@ class PlotWindow(QWidget):
 
 
 class ControlPanel(QWidget):
+    """
+    Description:
+
+        GUI panel to control patch generation parameters, visualization, and extraction workflow. Provides inputs for patch 
+        length, width, and sampling distance. Also includes navigation and extraction controls.
+
+    Input:
+        parent (QWidget): Reference to the main window.
+        plot_window (PlotWindow): Associated plot window to update graphics.
+
+    Output:
+        None
+    """
     def __init__(self, parent, plot_window):
         super().__init__(parent)
         self.plot_window = plot_window
