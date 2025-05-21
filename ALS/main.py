@@ -1,16 +1,15 @@
 import argparse
-import concurrent.futures
-import logging
 import multiprocessing as mp
 import os
 import sys
-from multiprocessing import Pool
 from typing import List, Tuple
 import numpy as np
 import yaml
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from PyQt6.QtWidgets import QApplication
+from tqdm import tqdm
+import logging
 
 from utils.flight_data import FlightData
 from utils.footprint_generator import Footprint
@@ -21,127 +20,123 @@ from utils.patch_model import Patch
 from utils.raster_loader import RasterLoader
 from utils.timer_logger import TimerLogger
 
-# Configuration
-parser = argparse.ArgumentParser()
-parser.add_argument("--yml", "-y", required=True, help="Path to the configuration file")
-args = parser.parse_args()
 
-# Config paths
-config = yaml.safe_load(open(args.yml, "r"))
-OUTPUT_DIR = config["OUTPUT_DIR"]
-LAS_DIR = config["LAS_DIR"]
 
-# Logger setup
-logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 
-timer = TimerLogger()
+class ALSPipeline():
+    def __init__(self, config_path: str):
+        self.config = yaml.safe_load(open(config_path, "r"))
+        self.las_dir = self.config["LAS_DIR"]
+        self.timer = TimerLogger()
+        
+        
+    def load_data(self) -> None:
+        self.timer.start("Flight & raster loading")
+        fd = FlightData(self.config)
+        rl = RasterLoader(self.config, flight_bounds=fd.bounds)
+        self.raster = rl.raster
+        self.raster_mesh = (rl.x_mesh, rl.y_mesh)
+        self.timer.stop("Flight & raster loading")
 
-def load_data() -> Tuple[np.ndarray, Tuple[np.ndarray, np.ndarray], Footprint]:
-    timer.start("Flight & raster loading")
-    fd = FlightData(config)
-    rl = RasterLoader(config, flight_bounds=fd.bounds)
-    raster = rl.raster
-    raster_mesh = (rl.x_mesh, rl.y_mesh)
-    timer.stop("Flight & raster loading")
+        self.timer.start("Footprint generation")
+        self.footprint = Footprint(raster=self.raster, raster_mesh=self.raster_mesh, flights=fd.flights, config=self.config)
+        self.timer.stop("Footprint generation")
 
-    timer.start("Footprint generation")
-    footprint = Footprint(raster=raster, raster_mesh=raster_mesh, flights=fd.flights, config=config)
-    timer.stop("Footprint generation")
 
-    return raster, raster_mesh, footprint
+    def generate_patches(self):
+        self.timer.start("Patch generation")
+        self.pg = PatchGenerator(superpos_zones=self.footprint.superpos_masks, raster_mesh=self.raster_mesh, raster=self.raster, patch_params=self.config["PATCH_DIMS"])
+        self.timer.stop("Patch generation")
 
-def run_gui(footprint: Footprint, patches_all: List, centerlines_all: List, contours_all: List,
-            raster: np.ndarray, raster_mesh: Tuple[np.ndarray, np.ndarray]) -> Tuple[bool, List, str]:
+    def launch_gui(self):
+        app = QApplication(sys.argv)
+        window = GUIMainWindow(
+            superpositions=  self.footprint.superpos_masks,
+            patches=         self.pg.patches_list,
+            centerlines=     self.pg.centerlines_list,
+            patch_params=    self.config["PATCH_DIMS"],
+            raster_mesh=     self.raster_mesh,
+            raster=          self.raster,
+            contours=        self.pg.contours_list,
+            extraction_state=False,
+            flight_pairs=    self.footprint.superpos_flight_pairs,
+            output_dir=      self.config["OUTPUT_DIR"],
+        )
+        window.show()
+        app.exec()
+        
+        self.extraction_state = window.control_panel.extraction_state
+        self.patch_list = window.control_panel.new_patches_instance
+        self.output_dir = window.control_panel.output_dir 
+        
+    def extract(self):
+        self.timer.start("Patch extraction (all flights)")
+        
+        if self.config["EXTRACTION_MODE"] in ["Extra_Bytes", "binary"]:
+            all_patches_flat = [patch for group in self.patch_list for patch in group]
+            flight_ids = sorted(set(f for pair in self.footprint.superpos_flight_pairs for f in pair))
 
-    app = QApplication(sys.argv)
-    window = GUIMainWindow(
-        superpositions=footprint.superpos_masks,
-        patches=patches_all,
-        centerlines=centerlines_all,
-        patch_params=config["PATCH_DIMS"],
-        raster_mesh=raster_mesh,
-        raster=raster,
-        contours=contours_all,
-        extraction_state=False,
-        flight_pairs=footprint.superpos_flight_pairs,
-        output_dir=OUTPUT_DIR,
-    )
-    window.show()
-    app.exec()
+            tasks = []
+            for flight_id in flight_ids:
+                pair_dir = f"{self.output_dir}/Flight_{flight_id}"
+                tasks.append((flight_id, all_patches_flat, self.config["LAS_DIR"], self.output_dir, pair_dir, self.footprint.superpos_flight_pairs, self.pg.contours_list))
 
-    return window.control_panel.extraction_state, window.control_panel.new_patches_instance, window.control_panel.output_dir
+            for args in tqdm(tasks, desc="Extracting patches per flight", unit="flight"):
+                self.process_flight(*args)
+            
+        elif self.config["EXTRACTION_MODE"] == "independent":
+            for (flight_i, flight_j), patch_group in zip(self.footprint.superpos_flight_pairs, self.patch_list):
+                for flight_id in [flight_i, flight_j]:
+                    pair_dir = f"{self.output_dir}/Flights_{flight_i}_{flight_j}"
+                    os.makedirs(pair_dir, exist_ok=True)
+                    self.process_flight(flight_id, patch_group, self.config["LAS_DIR"], self.output_dir, pair_dir, self.footprint.superpos_flight_pairs, self.pg.contours_list)
 
-def get_flight_union_contour(flight_id: str, superpos_pairs: List[Tuple[str, str]], contours_list: List[np.ndarray]) -> Polygon:
-    polygons = []
-    for i, (f1, f2) in enumerate(superpos_pairs):
-        if flight_id in (f1, f2):
-            contour = contours_list[i]
-            if isinstance(contour, np.ndarray):
-                coords = contour.reshape(-1, 2)
-                if len(coords) >= 3:
-                    polygons.append(Polygon(coords))
-            elif isinstance(contour, Polygon):
-                polygons.append(contour)
-    return unary_union(polygons) if polygons else Polygon()
+        self.timer.start("Patch extraction (all flights)")
 
-def process_flight(flight_id: str, flight_patch: List[Patch], LAS_DIR: str, OUTPUT_DIR: str, pair_dir: str,
-                   superpos_pairs: List[Tuple[str, str]], contours_all: List[np.ndarray]) -> None:
-    timer.start(f"Flight {flight_id} processing")
-    input_file = LAS_DIR.format(flight_id=flight_id)
-    flight_polygon = get_flight_union_contour(flight_id, superpos_pairs, contours_all)
+    def process_flight(self, flight_id: str, flight_patch: List[Patch], LAS_DIR: str, OUTPUT_DIR: str,
+                        pair_dir: str, superpos_pairs: List[Tuple[str, str]], contours_all: List[np.ndarray]) -> None:
+        input_file = LAS_DIR.format(flight_id=flight_id)
+        flight_polygon = self.get_flight_union_contour(flight_id, superpos_pairs, contours_all)
 
-    relevant_patches = [patch for patch in flight_patch if patch.shapely_polygon.intersects(flight_polygon)]
+        relevant_patches = [patch for patch in flight_patch if patch.shapely_polygon.intersects(flight_polygon)]
 
-    extractor = LasExtractor(config, input_file, relevant_patches)
-    if extractor.read_point_cloud():
-        extractor.process_all_patches(relevant_patches, OUTPUT_DIR, flight_id, pair_dir)
-    timer.stop(f"Flight {flight_id} processing")
+        extractor = LasExtractor(self.config, input_file, relevant_patches)
+        if extractor.read_point_cloud():
+            extractor.process_all_patches(relevant_patches, OUTPUT_DIR, flight_id, pair_dir)
 
-def run_extraction(footprint: Footprint, patches: List[List[Patch]], LAS_DIR: str, OUTPUT_DIR: str,
-                   contours_all: List[np.ndarray]) -> None:
-    timer.start("Patch extraction (all flights)")
+    def get_flight_union_contour(self, flight_id: str, superpos_pairs: List[Tuple[str, str]], contours_list: List[np.ndarray]) -> Polygon:
+        polygons = []
+        for i, (f1, f2) in enumerate(superpos_pairs):
+            if flight_id in (f1, f2):
+                contour = contours_list[i]
+                if isinstance(contour, np.ndarray):
+                    coords = contour.reshape(-1, 2)
+                    if len(coords) >= 3:
+                        polygons.append(Polygon(coords))
+                elif isinstance(contour, Polygon):
+                    polygons.append(contour)
+        return unary_union(polygons) if polygons else Polygon()
 
-    if config["EXTRACTION_MODE"] == "Extra_Bytes":
-        all_patches_flat = [patch for group in patches for patch in group]
-        flight_ids = sorted(set(f for pair in footprint.superpos_flight_pairs for f in pair))
-
-        tasks = []
-        for flight_id in flight_ids:
-            pair_dir = f"{OUTPUT_DIR}/Flight_{flight_id}"
-            tasks.append((flight_id, all_patches_flat, LAS_DIR, OUTPUT_DIR, pair_dir, footprint.superpos_flight_pairs, contours_all))
-
-        for args in tasks:
-            process_flight(*args)
-    elif config["EXTRACTION_MODE"] == "independent":
-        for (flight_i, flight_j), patch_group in zip(footprint.superpos_flight_pairs, patches):
-            for flight_id in [flight_i, flight_j]:
-                pair_dir = f"{OUTPUT_DIR}/Flights_{flight_i}_{flight_j}"
-                os.makedirs(pair_dir, exist_ok=True)
-                process_flight(flight_id, patch_group, LAS_DIR, OUTPUT_DIR, pair_dir, footprint.superpos_flight_pairs, contours_all)
-
-    
-
-    timer.stop("Patch extraction (all flights)")
-
-def main() -> None:
-    # Load flight lines, DTM and compute footprints
-    raster, raster_mesh, footprint = load_data()    
-    # Compute patches
-    timer.start("Patch generation")
-    pg = PatchGenerator(superpos_zones=footprint.superpos_masks, raster_mesh=raster_mesh, raster=raster, patch_params=config["PATCH_DIMS"])
-    timer.stop("Patch generation")
-    # GUI
-    extraction_state, new_patches_instance, updated_output_dir = run_gui(
-        footprint, pg.patches_list, pg.centerlines_list, pg.contours_list, raster, raster_mesh
-    )
-    # Proceed extraction
-    if extraction_state:
-        run_extraction(footprint, new_patches_instance, LAS_DIR, updated_output_dir, pg.contours_list)
-    else:
-        logging.info("Window closed without extraction.")
-
-    timer.summary()
-
+    def run(self):
+        self.timer.start("ALS total time")
+        self.load_data()
+        self.generate_patches()
+        self.launch_gui()
+        
+        if self.extraction_state:
+            self.extract()
+        
+        self.timer.stop("ALS total time")
+        self.timer.summary()
+        
+        
 if __name__ == "__main__":
-    main()
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--yml", "-y", required=True, help="Path to the configuration file")
+    args = parser.parse_args()
 
+    pipeline = ALSPipeline(config_path=args.yml)
+    pipeline.run()
+        

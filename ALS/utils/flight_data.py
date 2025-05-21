@@ -41,6 +41,7 @@ class FlightData:
         self.log_dir = config["LOG_DIR"]
         self.trajectory_path = config["TRAJECTORY_PATH"]
         self.dow = config["DAY_OF_WEEK"]
+        self.trajectory_cols = config["TRAJECTORY_COLUMNS"]
 
         self.flights = {}  # Store extracted flights
         self.bounds = []  # Store E/N - min/max coordinates for each flight
@@ -57,69 +58,22 @@ class FlightData:
     
     def extract_flight_times(self):
         """
-        Extracts flight start/end times from log or JSON metadata depending on file format.
+        Extracts flight start/end times for each flight ID from timing metadata.
 
-        Input:
-            None (uses self.las_dir and self.log_dir internally)
+        If a JSON file exists at self.log_dir (recommended), it is used to extract 
+        start and end times for each flight. Otherwise, a custom .log file method 
+        is used (used in Arpette dataset).
 
-        Output:
-            dict[str, dict[str, float]]: Flight time intervals per ID, formatted as:
+        Returns:
+            dict[str, dict[str, float]]: Flight time intervals per flight ID, formatted as:
                 {"flight_id": {"start": float, "end": float}, ...}
 
         Raises:
-            ValueError: If file format is unknown or unsupported.
+            FileNotFoundError: If neither JSON nor log files are found.
+            ValueError: If file format or parsing fails.
         """
-        if "." not in self.las_dir:
-            raise ValueError(f"Unable to determine file format from path: {self.las_dir}")
-        
-        self.file_format = self.las_dir.split(".")[-1].lower()
-
-        if self.file_format in ["las", "laz"]:
-            flight_times = {}
-            flight_ids = []
-
-            directory = os.path.dirname(self.las_dir)
-            for filename in os.listdir(directory):
-                if filename.endswith(".laz"):
-                    flight_name = filename.split(".")[0]
-                    flight_id = flight_name.split("_")[-1]
-                    flight_ids.append(flight_id)
-
-            flight_ids.sort()
-            directory_log = os.path.join(directory, "timestamps")
-            log_file_pattern = os.path.basename(self.log_dir)
-
-            for flight_id in flight_ids:
-                log_file = log_file_pattern.format(flight_id=flight_id)
-                log_file_path = os.path.join(directory_log, log_file)
-
-                if not os.path.exists(log_file_path):
-                    logging.warning(f"Missing log file: {log_file_path}")
-                    continue
-
-                with open(log_file_path, "r", encoding="ISO-8859-1") as f:
-                    lines = f.readlines()
-
-                try:
-                    start_time_line = lines[136].strip()
-                    end_time_line = lines[137].strip()
-                    if "File start" in start_time_line and "File end" in end_time_line:
-                        start_time = float(start_time_line.split("(")[1].split()[0])
-                        end_time = float(end_time_line.split("(")[1].split()[0])
-                        flight_times[flight_id] = {"start": start_time, "end": end_time}
-                    else:
-                        logging.warning(f"Unexpected format in log file: {log_file_path}")
-                except IndexError:
-                    logging.warning(f"Log file too short or malformed: {log_file_path}")
-                except (ValueError, IndexError) as e:
-                    logging.warning(f"Failed to parse times from {log_file_path}: {e}")
-
-            return flight_times
-
-        elif self.file_format in ["txt", "TXYZS"]:
-            if not os.path.exists(self.log_dir):
-                raise FileNotFoundError(f"GPS_Times.json not found at {self.log_dir}")
-
+        # First case: recommended -> JSON format
+        if os.path.exists(self.log_dir) and self.log_dir.endswith(".json"):
             with open(self.log_dir, "r") as f:
                 flight_times_json = json.load(f)
 
@@ -135,25 +89,58 @@ class FlightData:
 
             return flight_times
 
-        else:
-            raise ValueError(f"Unsupported file format: {self.file_format}")
-            
+        # Second case: legacy Arpette dataset -> .log files per flight
+        flight_times = {}
+        flight_ids = []
+
+        directory = os.path.dirname(self.las_dir)
+        for filename in os.listdir(directory):
+            if filename.endswith(".laz") or filename.endswith(".las") or filename.endswith(".txt") or filename.endswith(".TXYZS"):
+                flight_name = filename.split(".")[0]
+                flight_id = flight_name.split("_")[-1]
+                flight_ids.append(flight_id)
+
+        flight_ids.sort()
+        directory_log = os.path.join(directory, "timestamps")
+        log_file_pattern = os.path.basename(self.log_dir)
+
+        for flight_id in flight_ids:
+            log_file = log_file_pattern.format(flight_id=flight_id)
+            log_file_path = os.path.join(directory_log, log_file)
+
+            if not os.path.exists(log_file_path):
+                continue
+            with open(log_file_path, "r", encoding="ISO-8859-1") as f:
+                lines = f.readlines()
+
+            try:
+                start_time_line = lines[136].strip()
+                end_time_line = lines[137].strip()
+                if "File start" in start_time_line and "File end" in end_time_line:
+                    start_time = float(start_time_line.split("(")[1].split()[0])
+                    end_time = float(end_time_line.split("(")[1].split()[0])
+                    flight_times[flight_id] = {"start": start_time, "end": end_time}
+                else:
+                    logging.warning(f"Unexpected format in log file: {log_file_path}")
+            except (ValueError, IndexError) as e:
+                logging.warning(f"Failed to parse times from {log_file_path}: {e}")
+
+        if not flight_times:
+            raise FileNotFoundError("No valid flight times found in either JSON or log files.")
+
+        return flight_times
+
     
     def load_flight_data(self):
         """
         Loads the full trajectory data file as a pandas DataFrame.
 
-        Input:
-            None (uses self.trajectory_path)
+        Uses the column names defined in the configuration file.
 
-        Output:
+        Returns:
             pd.DataFrame: Full trajectory data.
         """
-        if self.file_format in ["las", "laz"]:
-            cols = ["gps_time","lon","lat","alt","roll","pitch","yaw","?"]
-        else:
-            cols = ["gps_time","lon","lat","alt","roll","pitch","yaw"]
-
+        cols = self.trajectory_cols
         return pd.read_csv(self.trajectory_path, names=cols, header=None)
 
     def load_flights(self):

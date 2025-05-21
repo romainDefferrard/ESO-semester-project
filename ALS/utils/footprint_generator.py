@@ -22,13 +22,13 @@ from tqdm import tqdm
 from shapely.vectorized import contains
 
 import matplotlib.pyplot as plt
-from shapely.geometry import Point, Polygon, MultiPoint
-from scipy.spatial import ConvexHull
-from skimage import measure
+from shapely.geometry import Polygon
 
+
+import matplotlib.colors as mcolors
 
 def get_footprint_wrapper(args):
-    return Footprint.max_distance_footprint(*args)
+    return Footprint.get_footprint(*args)
 
 def build_polygon_from_masks(left_mask, right_mask, x_mesh, y_mesh):
     def extract_coords(mask):
@@ -90,9 +90,6 @@ class Footprint:
 
         self.get_superpos_zones()
 
-    
-
-
     def get_superpos_zones(self) -> None:
         """
         Computes all visibility masks and overlaps between flights.
@@ -120,7 +117,6 @@ class Footprint:
                 self.lidar_tilt_angle,
                 self.lidar_fov,
                 self.sampling_interval,
-                self.buffer_dist,
             )
             for flight_key in flight_key_order
         ]
@@ -150,6 +146,7 @@ class Footprint:
             self.superpos_masks.append(combined_mask)
             self.superpos_flight_pairs.append((flight_id_1, flight_id_2))
 
+    @staticmethod
     def get_footprint(
         flight_key: str,
         flight_data: dict,
@@ -160,10 +157,14 @@ class Footprint:
         lidar_tilt_angle: float,
         lidar_fov: float,
         sampling_interval: int,
-        buffer_dist: float,
     ) -> Tuple[str, np.ndarray]:
         """
-        Computes a single visibility mask from a flight using scan geometry.
+        This function computes the observed LiDAR footprint for a single flight by identifying, 
+        at each sampled position, the farthest visible terrain cell along the left and right edges 
+        of the field of view (FOV), based on scanning angles and DTM elevation. These edge points are 
+        classified as left or right depending on the scan direction, then combined into a closed polygon 
+        representing the footprint boundary. The polygon is finally rasterized into a boolean mask 
+        indicating all grid cells inside the observed area.
 
         Inputs:
             flight_key (str):              Identifier for the flight.
@@ -174,83 +175,10 @@ class Footprint:
             lidar_tilt_angle (float):      LiDAR tilt angle in degrees.
             lidar_fov (float):             Field of view angle in degrees.
             sampling_interval (int):       Interval for downsampling trajectory points.
-            buffer_dist (float):           Distance to buffer the trajectory in forward/backward direction.
 
         Output:
             tuple[str, np.ndarray]: (flight_key, observed_mask), where observed_mask is a boolean np.ndarray.
         """
-
-        half_fov_rad = np.radians(lidar_fov / 2)
-        E = flight_data["lon"][::sampling_interval]
-        N = flight_data["lat"][::sampling_interval]
-        A = flight_data["alt"][::sampling_interval]
-
-        observed_mask = np.zeros_like(raster_map, dtype=bool)
-
-        for i, (e, n, alt) in enumerate(zip(E, N, A)):
-            trajectory_angle = np.arctan2(N.iloc[-1] - N.iloc[0], E.iloc[-1] - E.iloc[0])
-
-            if lidar_scan_mode == "left":
-                scanning_angle_1 = trajectory_angle + np.pi / 2 + np.radians(lidar_tilt_angle)
-                scanning_angle_2 = trajectory_angle - np.pi / 2 + np.radians(lidar_tilt_angle)
-            elif lidar_scan_mode == "right":
-                scanning_angle_1 = trajectory_angle + np.pi / 2 - np.radians(lidar_tilt_angle)
-                scanning_angle_2 = trajectory_angle - np.pi / 2 - np.radians(lidar_tilt_angle)
-            elif lidar_scan_mode == "across":
-                scanning_angle_1 = trajectory_angle + np.pi / 2
-                scanning_angle_2 = trajectory_angle - np.pi / 2
-
-            if i == 0:
-                e_avant = e + buffer_dist * np.cos(trajectory_angle)
-                n_avant = n + buffer_dist * np.sin(trajectory_angle)
-                e_arriere = e
-                n_arriere = n
-            elif i == len(E) - 1:
-                e_avant = e
-                n_avant = n
-                e_arriere = e - buffer_dist * np.cos(trajectory_angle)
-                n_arriere = n - buffer_dist * np.sin(trajectory_angle)
-            else:
-                e_avant = e + buffer_dist * np.cos(trajectory_angle)
-                n_avant = n + buffer_dist * np.sin(trajectory_angle)
-                e_arriere = e - buffer_dist * np.cos(trajectory_angle)
-                n_arriere = n - buffer_dist * np.sin(trajectory_angle)
-
-            angle_to_grid_forward = np.arctan2(y_mesh - n_avant, x_mesh - e_avant)
-            angle_to_grid_backward = np.arctan2(y_mesh - n_arriere, x_mesh - e_arriere)
-
-            def is_between(angle, min_angle, max_angle):
-                return ((angle - min_angle) % (2 * np.pi)) < ((max_angle - min_angle) % (2 * np.pi))
-
-            valid_scan_mask = is_between(angle_to_grid_forward, scanning_angle_1, scanning_angle_2) & \
-                              is_between(angle_to_grid_backward, scanning_angle_2, scanning_angle_1)
-
-            horizontal_distances = np.sqrt((x_mesh - e) ** 2 + (y_mesh - n) ** 2)
-            vertical_distances = alt - raster_map
-            line_of_sight_angles = np.arctan2(horizontal_distances, vertical_distances)
-            fov_mask = np.abs(line_of_sight_angles) <= half_fov_rad
-
-            observed_mask |= valid_scan_mask & fov_mask
-            
-
-
-        return flight_key, observed_mask
-
-    def max_distance_footprint(
-        flight_key: str,
-        flight_data: dict,
-        raster_map: np.ndarray,
-        x_mesh: np.ndarray,
-        y_mesh: np.ndarray,
-        lidar_scan_mode: str,
-        lidar_tilt_angle: float,
-        lidar_fov: float,
-        sampling_interval: int,
-        buffer_dist: float,
-    ) -> Tuple[str, np.ndarray]:
-        import matplotlib.pyplot as plt
-        from shapely.geometry import Polygon
-        import matplotlib.colors as mcolors
 
         half_fov_rad = np.radians(lidar_fov / 2)
         E = flight_data["lon"][::sampling_interval]
@@ -296,34 +224,14 @@ class Footprint:
                     max_dist_mask = (horizontal_distances == max_dist) & direction_visible_mask
                     max_distance_mask |= max_dist_mask
 
-                    # Now classify max points as left/right
-                    if scan_angle == scanning_angle_1:
+                    # Classify max points as left/right
+                    if scan_angle == scanning_angle_2:
                         left_mask_total |= max_dist_mask
                     else:
                         right_mask_total |= max_dist_mask
 
-        # --- Polygon construction ---
+        # --- polygon & mask ---
         polygon = build_polygon_from_masks(left_mask_total, right_mask_total, x_mesh, y_mesh)
         final_mask = contains(polygon, x_mesh, y_mesh)
-
-        # --- Plotting ---
-        plotting=False
-        if plotting:
-            fig, ax = plt.subplots(figsize=(8, 6))
-            single_color = mcolors.ListedColormap(['darkred'])
-            ax.pcolormesh(
-                x_mesh, y_mesh,
-                np.where(final_mask, 1, np.nan),
-                cmap=single_color,
-                shading='auto'
-            )
-            x_poly, y_poly = polygon.exterior.xy
-            ax.plot(x_poly, y_poly, color='blue', linewidth=2)
-            ax.set_title(f"Footprint Polygon: {flight_key}")
-            ax.set_xlabel("Easting")
-            ax.set_ylabel("Northing")
-            ax.axis("equal")
-            plt.tight_layout()
-            plt.show()
 
         return flight_key, final_mask
