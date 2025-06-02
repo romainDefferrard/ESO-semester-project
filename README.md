@@ -4,7 +4,7 @@
 
 This repository presents a modular and efficient pipeline for detecting spatial overlaps in LiDAR datasets, 
 covering both Airborne Laser Scanning (ALS) and Mobile Laser Scanning (MLS) acquisitions. The project was 
-developed as part of a semester project at EPFL within the Environmental Sensing and Observation (ESO) Laboratory.
+developed as part of a semester project at EPFL within the Earth Sensing and Observation (ESO) Laboratory.
 
 The purpose of this tool is to identify and extract meaningful regions where LiDAR acquisitions overlap, 
 to facilitate and optimize downstream tasks such as point-to-point matching. 
@@ -105,5 +105,5 @@ cd MLS
 This will load the trajectory shapefile and configuration file specified in the script and open the GUI for inspecting and exporting overlaps.
 
 
-## Author
-This project was developed by Romain Defferrard under the supervision of Aurelien Brun and Pr. Jan Skaloud as part of a semester project at the EPFL Environmental Sensing and Observation Laboratory (ESO), 2025.
+## Author
+This project was developed by **Romain Defferrard** under the supervision of Aurelien Brun and Pr. Jan Skaloud as part of a semester project at the EPFL Earth Sensing and Observation Laboratory (ESO), 2025.
