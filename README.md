@@ -11,6 +11,23 @@ to facilitate and optimize downstream tasks such as point-to-point matching.
 
 ---
 
+## Context & Datasets
+
+The development of this pipeline was carried out using the following real-world datasets provided by the 
+**Earth Sensing & Observation Laboratory (ESO)**:
+
+- **ALS**:
+  - `Vallet2020`
+  - `Arpette`
+  - Config files for these datasets are available under `ALS/config/`.
+
+- **MLS**:
+  - The shapefile trajectory in **Val de Bagnes** representing the movement of a mobile scanner splitted according to scanner operations.
+    
+These datasets were used to validate the workflow, demonstrate overlap detection performance, and test the export and visualization interfaces.
+
+---
+
 ## Project Overview
 
 The pipeline is composed of two main branches:
@@ -63,6 +80,30 @@ ESO_semester_project/
   <img src="Images/mls_pipeline.png" alt="ALS Pipeline" width="400"/>
 </div>
 
-
 ---
+## Usage
 
+
+### ALS Pipeline
+
+To launch the ALS pipeline, use the provided shell script:
+
+```bash
+cd ALS
+./run_pipeline.sh
+```
+Make sure the desired configuration file (e.g., `Arpette_config.yml` or `Vallet_config.yml`) is correctly set in the script.
+
+### MLS Pipeline
+
+To launch the MLS pipeline for road segment overlap detection:
+
+```bash
+cd MLS
+./run_mls.sh
+```
+This will load the trajectory shapefile and configuration file specified in the script and open the GUI for inspecting and exporting overlaps.
+
+
+## Author
+This project was developed by Romain Defferrard under the supervision of Aurelien Brun and Pr. Jan Skaloud as part of a semester project at the EPFL Environmental Sensing and Observation Laboratory (ESO), 2025.
