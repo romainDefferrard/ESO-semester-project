@@ -41,8 +41,9 @@ ESO_semester_project/
 │   └── utils/                 # Submodules for trajectory, DTM loading, footprint, patch, extraction
 ```
 
-![ALS Pipeline](Images/als_pipeline.png)
-
+<div align="center">
+  <img src="Images/als_pipeline.png" alt="ALS Pipeline" width="400"/>
+</div>
 ---
 
 ### Mobile Laser Scanning (MLS)
@@ -58,7 +59,10 @@ ESO_semester_project/
 │ └── utils/ # GUI and intersection logic
 ```
 
-![MLS Pipeline](Images/mls_pipeline.png)
+<div align="center">
+  <img src="Images/mls_pipeline.png" alt="ALS Pipeline" width="400"/>
+</div>
+
 
 ---
 
