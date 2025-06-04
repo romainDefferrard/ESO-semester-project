@@ -371,8 +371,8 @@ class LasExtractor:
         (those within the bounding box of the patch in E-N coordinates) into the local coordinate frame 
         of the patch. The local frame is defined such that:
             - The patch center becomes the origin (0, 0).
-            - The X-axis aligns with the patch's length direction (using the patch's "direction" vector).
-            - The Y-axis aligns with the patch's width direction.
+            - The y-axis aligns with the patch's length direction (using the patch's "direction" vector).
+            - The x-axis aligns with the patch's width direction.
 
         After transformation, the function checks whether each point lies within the rectangular bounds
         defined by the patch length and width.
