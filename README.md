@@ -53,9 +53,10 @@ It proceeds through a set of modular steps controlled via a configuration file:
 ```text
 ESO_semester_project/
 ├── ALS/
-│   ├── main.py                # Main entry point for ALS processing
-│   ├── config/                # YAML configuration files (e.g., Arpette_config.yml)
-│   └── utils/                 # Submodules for trajectory, DTM loading, footprint, patch, extraction
+│  ├── main.py                # Main entry point for ALS processing
+│  ├── run_*.sh               # Launcher shell script (* for "Vallet" or "Arpette")
+│  ├── config/                # YAML configuration files (e.g., Arpette_config.yml)
+│  └── utils/                 # Submodules for trajectory, DTM loading, footprint, patch, extraction
 ```
 
 <div align="center">
@@ -70,10 +71,10 @@ The MLS pipeline relies on geometric buffering of shapefile lines to identify po
 ```text
 ESO_semester_project/
 ├── MLS/
-│ ├── main_MLS.py # Main entry point for MLS pipeline
-│ ├── run_mls.sh # Launcher shell script
-│ ├── Config/ # Configuration file (e.g., mls_config.yml)
-│ └── Utils/ # GUI and intersection logic
+│  ├── main_MLS.py # Main entry point for MLS pipeline
+│  ├── run_mls.sh # Launcher shell script
+│  ├── Config/ # Configuration file (e.g., mls_config.yml)
+│  └── Utils/ # GUI and intersection logic
 ```
 
 <div align="center">
