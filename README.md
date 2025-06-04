@@ -22,7 +22,7 @@ The development of this pipeline was carried out using the following real-world 
   - Config files for these datasets are available under `ALS/config/`.
 
 - **MLS**:
-  - The shapefile trajectory in **Val de Bagnes** representing the movement of a mobile scanner splitted according to scanner operations.
+  - The shapefile trajectory in **Val de Bagnes** (VS) representing the movement of a mobile scanner splitted according to scanner operations.
     
 These datasets were used to validate the workflow, demonstrate overlap detection performance, and test the export and visualization interfaces.
 
