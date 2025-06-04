@@ -1,7 +1,7 @@
 """
 Filename: raster_loader.py
 Author: Romain Defferrard
-Date: 08-05-2025
+Date: 04-06-2025
 
 Description:
     This module defines the RasterLoader class, which loads a buffered subsection of a raster (DTM)
@@ -25,14 +25,14 @@ class RasterLoader:
 
         Input:
             config (dict): configuration dictionary.
-                - MNT_PATH (str): Path to raster file.
+                - DTM_PATH (str): Path to raster file.
                 - RASTER_BUFFER (float): Buffer distance [m].
             flight_bounds (list[float]): [E_min, E_max, N_min, N_max] bounds of flight area.
 
         Output:
             None (but sets self.raster, self.x_mesh, self.y_mesh, self.map_bounds)
         """
-        self.file_path = config["MNT_PATH"]
+        self.file_path = config["DTM_PATH"]
         self.buffer = config["RASTER_BUFFER"]
         self.flight_bounds = flight_bounds
         

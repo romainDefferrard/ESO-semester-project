@@ -1,7 +1,7 @@
 """
 Filename: flight_data.py
 Author: Romain Defferrard
-Date: 08-05-2025
+Date: 04-06-2025
 
 Description:
     This script handles the extraction and organization of flight data from trajectory files.
@@ -9,7 +9,7 @@ Description:
     are computed for further processing of DTM loading
 
     Main features:
-    - Extract flight start/end times from .log or JSON.
+    - Extract flight start/end times from or JSON or .log.
     - Load trajectory data 
     - Slice trajectories into individual flights.
     - Compute spatial bounds of all flight data.
@@ -17,7 +17,6 @@ Description:
 import json
 import pandas as pd
 import os
-import numpy as np
 import logging
 
 

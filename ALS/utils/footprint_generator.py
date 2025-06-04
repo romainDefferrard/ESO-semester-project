@@ -1,7 +1,7 @@
 """
 Filename: footprint_generator.py
 Author: Romain Defferrard
-Date: 08-05-2025
+Date: 04-06-2025
 
 Description:
     This module defines the Footprint class, which computes observed raster zones for a set of flight trajectories
@@ -20,12 +20,7 @@ from multiprocessing import Pool
 from typing import Dict, Tuple
 from tqdm import tqdm
 from shapely.vectorized import contains
-
-import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
-
-
-import matplotlib.colors as mcolors
 
 def get_footprint_wrapper(args):
     return Footprint.get_footprint(*args)
@@ -81,7 +76,6 @@ class Footprint:
         self.lidar_tilt_angle = config["LIDAR_TILT_ANGLE"]
         self.lidar_fov = config["LIDAR_FOV"]
         self.sampling_interval = config["FLIGHT_DOWNSAMPLING"]
-        self.buffer_dist = config["POSITION_BUFFER"]
 
         # Masks
         self.superpos_masks = []
@@ -92,7 +86,7 @@ class Footprint:
 
     def get_superpos_zones(self) -> None:
         """
-        Computes all visibility masks and overlaps between flights.
+        Computes all footprint masks and overlaps between flights.
 
         Input:
             None (uses internal attributes).
@@ -179,12 +173,11 @@ class Footprint:
         Output:
             tuple[str, np.ndarray]: (flight_key, observed_mask), where observed_mask is a boolean np.ndarray.
         """
-
         half_fov_rad = np.radians(lidar_fov / 2)
         E = flight_data["lon"][::sampling_interval]
         N = flight_data["lat"][::sampling_interval]
         A = flight_data["alt"][::sampling_interval]
-
+ 
         def get_scan_angles(trajectory_angle, mode, tilt_rad):
             if mode == "left":
                 return trajectory_angle + np.pi / 2 + tilt_rad, trajectory_angle - np.pi / 2 + tilt_rad
@@ -212,23 +205,28 @@ class Footprint:
             line_of_sight_angles = np.arctan2(horizontal_distances, vertical_distances)
             fov_mask = np.abs(line_of_sight_angles) <= half_fov_rad
 
-            tolerance = np.deg2rad(2)
+            tolerance = np.deg2rad(5)
 
             for scan_angle in [scanning_angle_1, scanning_angle_2]:
                 direction_mask = np.abs(angle_diff(angle_to_grid, scan_angle)) <= tolerance
                 direction_visible_mask = direction_mask & fov_mask
 
                 if np.any(direction_visible_mask):
-                    dists = horizontal_distances[direction_visible_mask]
-                    max_dist = np.max(dists)
-                    max_dist_mask = (horizontal_distances == max_dist) & direction_visible_mask
-                    max_distance_mask |= max_dist_mask
+                    # Extract indices of valid points
+                    idx = np.where(direction_visible_mask)
+                    dists = horizontal_distances[idx]
+                    max_idx = np.argmax(dists)
 
-                    # Classify max points as left/right
+                    max_i = idx[0][max_idx]
+                    max_j = idx[1][max_idx]
+
+                    max_distance_mask[max_i, max_j] = True
+
+                    # Classify into left/right
                     if scan_angle == scanning_angle_2:
-                        left_mask_total |= max_dist_mask
+                        left_mask_total[max_i, max_j] = True
                     else:
-                        right_mask_total |= max_dist_mask
+                        right_mask_total[max_i, max_j] = True
 
         # --- polygon & mask ---
         polygon = build_polygon_from_masks(left_mask_total, right_mask_total, x_mesh, y_mesh)

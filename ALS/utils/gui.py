@@ -1,7 +1,7 @@
 """
 Filename: gui.py
 Author: Romain Defferrard
-Date: 08-05-2025
+Date: 04-06-2025
 
 Description:
     This file implements the graphical user interface using PyQt6. It provides interactive tools to display
@@ -20,6 +20,12 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import numpy as np
 from .patch_generator import PatchGenerator
 from .patch_model import Patch
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 
 class PlotWindow(QWidget):
@@ -116,7 +122,7 @@ class ControlPanel(QWidget):
         self.new_patches_poly = []
 
         # Useful in the case of single band along centerline
-        self.patch_generator = PatchGenerator(self.plot_window.superpositions, self.plot_window.raster_mesh, self.plot_window.raster, self.patch_params)
+        self.patch_generator = PatchGenerator(self.plot_window.superpositions, self.plot_window.raster_mesh, self.patch_params)
 
         self.initUI_panel()
 
@@ -237,8 +243,7 @@ class ControlPanel(QWidget):
         self.patch_width = int(self.width_input.text())
         self.sample_dist = int(self.distance_input.text())
         self.patch_params = (self.patch_length, self.patch_width, self.sample_dist)
-        print(f"Updated Values - Length: {self.patch_length}, Width: {self.patch_width}, Distance: {self.sample_dist}")
-
+        logging.info(f"GUI Updated Values - Length: {self.patch_length}, Width: {self.patch_width}, Distance: {self.sample_dist}")
         self.update_all_patches()
 
     def update_flight_label(self):
@@ -250,7 +255,6 @@ class ControlPanel(QWidget):
             new_patch_gen = PatchGenerator(
                 superpos_zones=self.plot_window.superpositions,
                 raster_mesh=self.plot_window.raster_mesh,
-                raster=self.plot_window.raster,
                 patch_params=self.patch_params,
             )
             patches_instance = new_patch_gen.patches_list

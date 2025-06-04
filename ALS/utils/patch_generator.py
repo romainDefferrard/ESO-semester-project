@@ -1,24 +1,42 @@
+""" 
+Filename: patch_generator.py
+Author: Romain Defferrard
+Date: 04-06-2025
+
+Description:
+    This module defines the PatchGenerator class, which generates rectangular patch polygons
+    within overlapping LiDAR flight zones. It uses the raster mesh as the Swiss coordinate grid, 
+    apply PCA to find the dominant direction of the estimated overlap, and sample patches along that centerline.
+
+    The generated patches are stored as Patch objects with geometric metadata (center, direction, etc.).
+"""
 import numpy as np
 from typing import List, Tuple, Optional
 from skimage.measure import find_contours, approximate_polygon
-from shapely.geometry import Polygon, LineString, Point
+from shapely.geometry import Polygon, LineString
 from sklearn.decomposition import PCA
 import warnings
 
 from .patch_model import PatchParams, Patch
 
-"""
-A partir des zones de superposition on joue avec les polygones 
-pour créer les patchs samplés sur la ligne directice de la zone. 
-"""
-
 
 class PatchGenerator:
     def __init__(
-        self, superpos_zones: List[np.ndarray], raster_mesh: Tuple[np.ndarray, np.ndarray], raster: np.ndarray, patch_params: Tuple[float, float, float]
+        self, superpos_zones: List[np.ndarray], raster_mesh: Tuple[np.ndarray, np.ndarray], patch_params: Tuple[float, float, float]
     ):
+        """
+        Initializes the PatchGenerator class.
+
+        Inputs:
+            superpos_zones (List[np.ndarray]):           List of overlapping area masks.
+            raster_mesh (Tuple[np.ndarray, np.ndarray]): (x_mesh, y_mesh) for spatial mapping.
+            patch_params (Tuple[float, float, float]):   (length, width, sample_distance) of patches.
+            
+        Output:
+            None
+        """
+
         self.superpos_zones_all = superpos_zones
-        self.raster_map = raster  # Only useful for plotting
         self.x_mesh, self.y_mesh = raster_mesh
         self.band_length, self.band_width, self.sample_distance = patch_params
 
@@ -39,7 +57,16 @@ class PatchGenerator:
         self.process_zones()
 
     def process_zones(self) -> None:
-        """Process each superposition zone to generate centerlines and patches."""
+        """
+        Iterate through each overlapping zone to generate the contour polygon, PCA centerline and 
+        series of rectangular patches.
+
+         Stores outputs in:
+            - self.contours_list (List[np.ndarray]):    polygon in Swiss coordinates
+            - self.centerlines_list (List[np.ndarray]): PCA of overlaps 
+            - self.patches_list (List[List[Patch]]):    list of patch objects per zone
+
+        """
         for superpos_zone in self.superpos_zones_all:
             self.get_contour(superpos_zone)  # Generate the contour for the current zone
             self.get_centerline(superpos_zone)  # Generate the centerline for the current zone
@@ -47,7 +74,18 @@ class PatchGenerator:
             self.patches_list.append(patches)
 
     def get_contour(self, superpos_zone: np.ndarray) -> None:
-        """Get the contour of a single superposition zone"""
+        """
+        Extract a polygonal contour from a superposition zone using skimage library. 
+
+        Converts pixel indices to Swiss coordinate reference using mesh grids and stores
+        the result in self.contours_list.
+
+        Input:
+            superpos_zone (np.ndarray): Single boolean mask of overlapping area
+
+        Output:
+            None
+        """
         contour_bulk = find_contours(superpos_zone.astype(int))[0]
         coords = approximate_polygon(contour_bulk, tolerance=self.tol)
 
@@ -61,6 +99,15 @@ class PatchGenerator:
         self.contours_list.append(contour)
 
     def get_centerline(self, superpos_zone: np.ndarray) -> None:
+        """
+        Estimate the main orientation of a superposition zone using PCA on its pixel coordinates.
+
+        Input:
+            superpos_zone (np.ndarray): Single boolean mask of overlapping area
+
+        Output:
+            None
+        """
         mask_coords = np.column_stack(np.where(superpos_zone))
         coord_points = np.array([self.x_mesh[mask_coords[:, 0], mask_coords[:, 1]], self.y_mesh[mask_coords[:, 0], mask_coords[:, 1]]]).T
 
@@ -81,6 +128,15 @@ class PatchGenerator:
         self.centerlines_list.append(centerline)
 
     def patches_along_centerline(self) -> List[np.ndarray]:
+        """
+        Generates rectangular patches at regular intervals along the PCA centerline.
+
+        Patches are defined based on configured band length/width and spacing.
+        A patch is only retained if fully within the previously computed contour polygon.
+
+        Returns:
+            List[np.ndarray]: List of valid Patch objects
+        """
         patches = []
 
         # Convert last contour stored and centerline to Shapely polygon and LineString
@@ -146,6 +202,18 @@ class PatchGenerator:
         return patches
 
     def create_patch(self, params: PatchParams) -> np.ndarray:
+        """
+        Create a rectangular patch polygon from its geometric definition (start point,
+        direction, perpendicular direction, width and length).
+
+        Converts the 4 corners to a polygon and stores both geometry and metadata.
+
+        Input:
+            params (PatchParams): Geometric parameters of the patch
+
+        Returns:
+            patch: Patch object with polygon and metadata
+        """
         half_width = params.width / 2
 
         corner1 = params.startpoint + params.length * params.direction + half_width * params.perp_direction
@@ -171,7 +239,20 @@ class PatchGenerator:
         return patch
 
     def compute_max_patch_length(self, idx: int) -> Tuple[np.ndarray, float]:
-        """Find the longest patch that fits along the centerline within the contour."""
+        """
+        Compute the longest valid patch length that remains entirely within the contour. (Called in gui.py)
+
+        This function starts from the first valid position along the centerline and 
+        gradually reduces the patch length until the generated patch is fully contained 
+        within the corresponding superposition contour.
+
+        Input:
+            idx (int): Index of the superposition zone (referring to contours_list and centerlines_list)
+
+        Output:
+            - start_point (np.ndarray): Coordinates of the starting point for the patch
+            - max_length (float):       Maximum patch length that does not exceed the contour bounds
+        """
         self.patch_id += 0
 
         contour = self.contours_list[idx]
@@ -223,7 +304,20 @@ class PatchGenerator:
         return start_point, max_length
 
     def create_single_patch(self, idx: int, start_point: np.ndarray, length: float, width: float) -> Optional[List[np.ndarray]]:
-        """Generate a single patch covering the full length of the centerline."""
+        """
+        Generate a single rectangular patch of given dimensions, placed at a specified start point
+        along the centerline of the selected superposition zone. (Called in gui.py)
+
+        Input:
+            idx (int): Index of the zone (from centerlines_list)
+            start_point (np.ndarray): Starting point of the patch in (x, y) coordinates
+            length (float): Length of the patch along the main axis (centerline direction)
+            width (float): Width of the patch perpendicular to the main axis
+
+        Output:
+            Optional[List[np.ndarray]]:
+                - A list containing a single Patch object, or None if centerline is invalid
+        """
         centerline = self.centerlines_list[idx]
 
         if len(centerline) < 2:
