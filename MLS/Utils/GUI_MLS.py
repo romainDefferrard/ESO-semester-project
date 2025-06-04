@@ -1,3 +1,18 @@
+"""
+Filename: GUI_MLS.py
+Author: Romain Defferrard
+Date: 04-06-2025
+
+Description:
+    PyQt6 interface for Mobile Laser Scanning (MLS) segment intersection analysis.
+    Includes:
+        - PlotWindow: interactive matplotlib display of buffer geometries and intersections.
+        - ControlPanel: extraction, reset, and segment information display panel.
+        - GUI_MLS: main window class to integrate plotting and control components.
+    This pipeline uses a TimerLogger utility to benchmark steps in the pipeline.
+"""
+
+
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFrame
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -6,10 +21,23 @@ from matplotlib.colors import to_rgba
 import geopandas as gpd
 import csv
 import os
+import logging
+from .timer_logger import TimerLogger
+
 
 
 class PlotWindow(QWidget):
     def __init__(self, parent):
+        """
+        Widget for plotting intersections and buffers over segments using matplotlib.
+        Allows rectangular selection for zooming and filtering.
+
+        Input:
+            parent (QWidget): Parent main window (GUI_MLS)
+
+        Output:
+            None
+        """
         super().__init__(parent)
         self.gdf = self.parent().gdf
         self.intersections = self.parent().intersections
@@ -21,7 +49,7 @@ class PlotWindow(QWidget):
         self.figure, self.ax = plt.subplots()
         self.figure.set_constrained_layout(True)
         self.canvas = FigureCanvas(self.figure)
-
+        
         layout = QVBoxLayout()
         layout.addWidget(self.canvas)
         self.setLayout(layout)
@@ -31,9 +59,15 @@ class PlotWindow(QWidget):
         self.setup_selector()
 
     def setup_selector(self):
+        """
+        Initialize interactive rectangular selector for zooming.
+
+        Output:
+            None
+        """
         self.toggle_selector = RectangleSelector(
             self.ax,
-            self.onselect,
+            self.on_select,
             useblit=True,
             button=[1],
             minspanx=5,
@@ -45,6 +79,15 @@ class PlotWindow(QWidget):
         self.canvas.mpl_connect("button_press_event", self.on_click)
 
     def plot_intersections(self, xmin=None, xmax=None, ymin=None, ymax=None):
+        """
+        Plot buffer and geometry data for overlapping segment zones. 
+        
+        Inputs:
+            xmin, xmax, ymin, ymax (float): Optional zoom coordinates
+
+        Output:
+            None
+        """
         all_ids = set()
         ids_pairs = []
 
@@ -104,7 +147,13 @@ class PlotWindow(QWidget):
             )
             self.control_panel.update_intersection_count(len(intersections_filtered))
 
-    def onselect(self, eclick, erelease):
+    def on_select(self, eclick, erelease):
+        """
+        Callback for rectangular zoom selector.
+
+        Output:
+            None
+        """
         x1, y1 = eclick.xdata, eclick.ydata
         x2, y2 = erelease.xdata, erelease.ydata
         xmin, xmax = sorted([x1, x2])
@@ -116,6 +165,12 @@ class PlotWindow(QWidget):
             self.setup_selector()
 
     def on_click(self, event):
+        """
+        Displays clicked intersection segment ID in the control panel.
+
+        Output:
+            None
+        """
         if event.inaxes == self.ax:
             x, y = event.xdata, event.ydata
             point = gpd.GeoSeries([gpd.points_from_xy([x], [y])[0]], crs=self.intersections.crs)
@@ -130,13 +185,32 @@ class PlotWindow(QWidget):
 
 class ControlPanel(QWidget):
     def __init__(self, parent, plot_window):
+        """
+        Control panel widget with buttons and labels for interaction and export.
+
+        Input:
+            parent (QWidget): Parent window
+            plot_window (PlotWindow): Associated plot widget
+
+        Output:
+            None
+        """
         super().__init__(parent)
         self.plot_window = plot_window
         self.intersections = self.parent().intersections
         self.output_path = self.parent().output_path
         self.initUI_panel()
+        self.timer = TimerLogger()
+        logging.basicConfig(level=logging.INFO, format='%(message)s')
+
 
     def initUI_panel(self):
+        """
+        Initialize layout and interactive controls.
+
+        Output:
+            None
+        """
         self.setFixedWidth(250)
         layout = QVBoxLayout()
         layout.setSpacing(10)
@@ -172,10 +246,25 @@ class ControlPanel(QWidget):
         layout.addWidget(self.reset_button)
 
     def reset_plot(self):
+        """
+        Resets the plot to full extent.
+
+        Output:
+            None
+        """
         self.plot_window.plot_intersections()
         self.plot_window.setup_selector()
 
     def update_intersection_count(self, count):
+        """
+        Update the displayed intersection count label.
+
+        Input:
+            count (int): Number of intersections
+
+        Output:
+            None
+        """
         self.intersections_count_label.setText(f"Intersections displayed: {count}")
 
     def layout_dividerLine(self, layout):
@@ -184,6 +273,10 @@ class ControlPanel(QWidget):
         layout.addWidget(divider)
 
     def extract_segments(self):
+        """
+        Export the currently displayed segment pairs to a CSV file.
+        """
+        self.timer.start("Extraction")
         intersection_ids = self.plot_window.current_ids
         gdf = self.plot_window.gdf_filtered
         rows = []
@@ -205,10 +298,23 @@ class ControlPanel(QWidget):
         print(f"Extracted {len(rows)} segment pairs to {filename}")
         self.extraction_state = True
         self.window().close()
+        self.timer.stop("Extraction")
+        self.timer.summary()
 
 
 class GUI_MLS(QMainWindow):
     def __init__(self, gdf, intersections, output):
+        """
+        Main GUI window for displaying MLS intersections.
+
+        Inputs:
+            gdf (GeoDataFrame): Segment geometries with buffer
+            intersections (GeoDataFrame): Precomputed intersection zones
+            output (str): Output path for CSV export
+
+        Output:
+            None
+        """
         super().__init__()
         self.setWindowTitle("MLS UI")
         self.setGeometry(100, 100, 1100, 700)
