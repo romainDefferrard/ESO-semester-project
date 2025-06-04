@@ -32,7 +32,7 @@ These datasets were used to validate the workflow, demonstrate overlap detection
 
 The pipeline is composed of two main branches:
 
-- **ALS Pipeline**: Computes the theoretical footprint of aerial LiDAR scans based on flight trajectory, sensor configuration, and digital terrain models (DTM). It then generates rectangular patches in overlap zones and extracts points accordingly.
+- **ALS Pipeline**: Computes the estimated footprints of aerial LiDAR scans based on flight trajectory, sensor configuration, and digital terrain models (DTM). It then generates rectangular patches in overlap zones and extracts points accordingly.
 
 - **MLS Pipeline**: Detects overlaps by buffering road segments (from shapefiles), computing their geometric intersections, and enabling manual selection/export through a GUI.
 
@@ -65,7 +65,7 @@ ESO_semester_project/
 
 ### Mobile Laser Scanning (MLS)
 
-The MLS pipeline relies on geometric buffering and shapefile line overlaps to identify scan redundancies in road-based acquisitions.
+The MLS pipeline relies on geometric buffering of shapefile lines to identify possible scan overlaps in road-based acquisitions.
 
 ```text
 ESO_semester_project/
@@ -73,7 +73,7 @@ ESO_semester_project/
 │ ├── main_MLS.py # Main entry point for MLS pipeline
 │ ├── run_mls.sh # Launcher shell script
 │ ├── Config/ # Configuration file (e.g., mls_config.yml)
-│ └── utils/ # GUI and intersection logic
+│ └── Utils/ # GUI and intersection logic
 ```
 
 <div align="center">
