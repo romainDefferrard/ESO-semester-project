@@ -9,7 +9,6 @@ developed as part of a semester project at EPFL within the Earth Sensing and Obs
 The purpose of this tool is to identify and extract meaningful regions where LiDAR acquisitions overlap, 
 to facilitate and optimize downstream tasks such as point-to-point matching. 
 
----
 
 ## Context & Datasets
 
@@ -26,7 +25,6 @@ The development of this pipeline was carried out using the following real-world 
     
 These datasets were used to validate the workflow, demonstrate overlap detection performance, and test the export and visualization interfaces.
 
----
 
 ## Project Overview
 
@@ -38,13 +36,11 @@ The pipeline is composed of two main branches:
 
 Both workflows are controlled via YAML configuration files and support interactive graphical interfaces for inspection and export.
 
----
 
 ## Project Structure & Workflow
 
 This project is organized into two main processing pipelines:
 
----
 
 ### Airborne Laser Scanning (ALS)
 
@@ -62,6 +58,7 @@ ESO_semester_project/
 <div align="center">
   <img src="Images/als_pipeline.png" alt="ALS Pipeline" width="400"/>
 </div>
+
 ---
 
 ### Mobile Laser Scanning (MLS)
@@ -81,7 +78,6 @@ ESO_semester_project/
   <img src="Images/mls_pipeline.png" alt="ALS Pipeline" width="400"/>
 </div>
 
----
 ## Usage
 
 
@@ -91,9 +87,11 @@ To launch the ALS pipeline, use the provided shell script:
 
 ```bash
 cd ALS
-./run_pipeline.sh
+./run_Arpette.sh
 ```
 Make sure the desired configuration file (e.g., `Arpette_config.yml` or `Vallet_config.yml`) is correctly set in the script.
+
+---
 
 ### MLS Pipeline
 
