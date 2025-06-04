@@ -2,13 +2,14 @@
 
 # Input files / directories
 TRAJECTORY_PATH: "Data/Vallet2020/Vallet2020_CH1903.txt"
-MNT_PATH: "Data/epsg2056_raster.tif"
+DTM_PATH: "Data/epsg2056_raster.tif"
 OUTPUT_DIR: "Output/Vallet/test_1"
 LAS_DIR: "Data/Vallet2020/ALS_line{flight_id}.txt"
 LOG_DIR: "Data/Vallet2020/GPS_Times.json"
 
 # Parameters
 DAY_OF_WEEK: 0
+TRAJECTORY_COLUMNS: ["gps_time", "lon", "lat", "alt", "roll", "pitch", "yaw"]
 
 # DTM
 RASTER_BUFFER: 250 # Buffer for the raster generation around the min/max North/East position of the trajectories [m]
@@ -24,8 +25,7 @@ PAIR_MODE: "successive" # Options: "successive", "all". Successive: only generat
 PATCH_DIMS: [100, 150, 400] # [length, width, height] [m]
 
 # Footprint
-FLIGHT_DOWNSAMPLING: 10 # Take a flight position every 10 coordinates in the trajectory file
-POSITION_BUFFER: 12.5 # the projected forward and backward distance from the flight position to consider for the footprint
+FLIGHT_DOWNSAMPLING: 100 # Take a flight position every 10 coordinates in the trajectory file
 
 # Extraction
-EXTRACTION_MODE: "encoded" # Options: "encoded", "independent". independent: extract all patches independently. encoded: outputs single file with classification code 
+EXTRACTION_MODE: "binary" # Options: "binary", "Extra_Bytes", "independent". independent: extract all patches independently. Extra_Bytes: write extra bytes in the .laz 
